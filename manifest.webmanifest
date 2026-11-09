@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "ImpulsaFit EMS",
+  "short_name": "ImpulsaFit",
+  "description": "Estudio de programación de sesiones EMS metabólicas y de hipertrofia.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f6f6",
+  "theme_color": "#11191d",
+  "icons": [
+    {
+      "src": "icons/impulsafit-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/impulsafit-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

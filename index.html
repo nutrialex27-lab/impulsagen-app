@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11191d">
+  <meta name="description" content="Prepara rutinas EMS metabólicas y de hipertrofia con ejercicios por material, tiempos de trabajo y ajustes por canal.">
+  <title>ImpulsaFit · Generador EMS</title>
+  <link rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials">
+  <link rel="icon" href="./icons/impulsafit.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/impulsafit-192.png">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="app"><div class="loading">Preparando tu sesión…</div></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="exerciseDialog" aria-labelledby="dialogTitle"></dialog>
+  <dialog id="chooserDialog" aria-labelledby="chooserTitle"></dialog>
+  <dialog id="installDialog" class="install-dialog" aria-labelledby="installTitle">
+    <div class="dialog-head">
+      <h2 id="installTitle">Instalar ImpulsaFit</h2>
+    </div>
+    <div class="dialog-body install-steps">
+      <p><strong>Android</strong> · En Chrome, abre el menú ⋮ y toca <b>Instalar aplicación</b> o <b>Añadir a pantalla de inicio</b>.</p>
+      <p><strong>iPhone o iPad</strong> · En Safari, toca <b>Compartir</b>, elige <b>Añadir a pantalla de inicio</b> y activa <b>Abrir como app web</b> si aparece.</p>
+      <p><strong>Ordenador</strong> · En Chrome o Edge, usa el icono de instalación de la barra de direcciones o busca <b>Instalar como aplicación</b> en el menú.</p>
+      <p class="tiny muted">Las sesiones se guardan en este dispositivo. Usa <b>Copia de seguridad</b> e <b>Importar copia</b> para llevarlas a otro.</p>
+    </div>
+    <form class="dialog-actions" method="dialog">
+      <button type="submit" class="primary" autofocus>Cerrar</button>
+    </form>
+  </dialog>
+  <input id="importFile" type="file" accept="application/json,.json" hidden>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
