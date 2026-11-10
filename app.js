@@ -9,6 +9,7 @@ import {PHASE_PATTERNS,createBlock,changePhase,moveItem,insertBlock,recommendedO
 import {stimulationReference,withStimulationProposals} from './stimulation.js';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
 import {routineSheet,renderRoutinePdf} from './routine-pdf.js';
+import {createAiAuthorization,exchangeAiCode,exerciseNameKey,generateExerciseProposals,proposalReferences} from './ai-exercises.js';
 import {
   HYPERTROPHY_TEMPLATE,HYPERTROPHY_ON,HYPERTROPHY_OFF,HYPERTROPHY_HZ,HYPERTROPHY_REST,HYPERTROPHY_LIMIT,HYPERTROPHY_GROUPS,
   initialHypertrophyBlocks,isHypertrophyPlan,isHypertrophyBlock,isHypertrophyWork,plannedEmsSeconds,
@@ -16,6 +17,9 @@ import {
 } from './hypertrophy.js';
 
 const STORAGE='impulsafit-ems-v1',root=document.querySelector('#app');
+const aiDialog=document.createElement('dialog');
+aiDialog.setAttribute('aria-labelledby','aiDialogTitle');
+document.body.append(aiDialog);
 let installPrompt;
 window.addEventListener('beforeinstallprompt', event => {
   event.preventDefault();
@@ -40,6 +44,7 @@ async function installApp() {
   document.querySelector('#installDialog').showModal();
 }
 const icons={
+ sparkles:'<path d="M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3ZM5 3v4M3 5h4m12 12v4m-2-2h4"/>',
  shuffle:'<path d="m3 4 3 0 12 16h3m-4-4 4 4-4 0M3 20h3l4-5m4-6 4-5h3m-4 0 4 0-4 4"/>',
  lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
  unlock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.5-2"/>',
@@ -59,7 +64,10 @@ const icons={
 const icon=name=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]||icons.chevron}</svg>`;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>globalThis.crypto?.randomUUID?.()||`id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const ui={page:'session',query:'',pattern:'',phase:'',group:'',material:'',chooser:null,expanded:new Set(),undo:[],toastTimer:null};
+const ui={page:'session',query:'',pattern:'',phase:'',group:'',material:'',chooser:null,ai:null,expanded:new Set(),undo:[],toastTimer:null};
+const AI_CONNECTION='impulsafit-ai-session';
+let aiKey='';
+try{aiKey=sessionStorage.getItem(AI_CONNECTION)||'';}catch{}
 const fresh=()=>({schema:1,catalogVersion:CATALOG_VERSION,programmingVersion:PROGRAMMING_VERSION,profile:'sin-definir',emphasis:'equilibrado',database:structuredClone(SEED),blocks:makeTemplate(),template:'visual',filters:{level:2,equipment:[...DEFAULT_EQUIPMENT],noFloor:false,noOverhead:true,noTravel:true,avoidLast:false,variation:'zone'},saved:[],title:'Metabólica · Sesión nueva',notes:''});
 let data=fresh(),storageError=false,loadFailure=false,catalogUpdated=false,programmingUpdated=false;
 try {const stored=localStorage.getItem(STORAGE);if(stored){const previous=JSON.parse(stored);programmingUpdated=(previous.programmingVersion||0)<PROGRAMMING_VERSION;catalogUpdated=(previous.catalogVersion||1)<CATALOG_VERSION;data=upgradeState(previous);data.title=typeof data.title==='string'?data.title.slice(0,140):'Metabólica · Sesión nueva';data.notes=typeof data.notes==='string'?data.notes.slice(0,2000):'';}}
@@ -188,10 +196,10 @@ function exerciseHTML(b,s,index,t){
   const e=data.database.find(e=>e.id===s.exerciseId),valid=e&&eligible(e,b,s,data.filters),attrs=`data-block="${esc(b.id)}" data-slot="${esc(s.id)}"`;
   return `<article class="exercise ${s.locked?'locked':''} ${!valid?'invalid':''}"><div class="exercise-order">${index+1}</div><div><h3 class="${!e?'blank-exercise':''}">${e?esc(e.name):'Selecciona o genera un ejercicio'}</h3><div class="exercise-meta"><span>${esc(PATTERNS[s.pattern])}</span><span>${e?.equipment.length?e.equipment.map(k=>esc(EQUIPMENT[k]||k)).join(' + '):'Sin material'}</span>${e?`<span class="exercise-level">Complejidad ${MOVEMENT_LEVELS[e.level].toLowerCase()}</span>`:''}${s.locked?'<span>Fijado al generar</span>':''}</div>${e?`<p class="exercise-cue">${esc(e.cue)}</p><details><summary>Ver regresión y cambiar criterio</summary><p class="exercise-cue">${esc(e.regression)}</p><label class="tiny">Criterio del hueco<br><select aria-label="Criterio para ${esc(e.name)}" data-change="slot-pattern" ${attrs}>${selectOptions(PATTERNS,s.pattern)}</select></label><br>${button('pick','Explorar todo el bloque','edit',{cls:'small ghost text-button',extra:attrs})}<div class="slot-order-actions">${button('move-slot','Subir',null,{cls:'small ghost',extra:attrs+' data-direction="-1"'+(index===0?' disabled':'')})}${button('move-slot','Bajar',null,{cls:'small ghost',extra:attrs+' data-direction="1"'+(index===b.slots.length-1?' disabled':'')})}${button('remove-slot','Quitar hueco','trash',{cls:'small ghost danger',extra:attrs+(b.slots.length===1?' disabled':'')})}</div></details>`:`<label class="tiny">Criterio<select data-change="slot-pattern" ${attrs} aria-label="Criterio del hueco">${selectOptions(PATTERNS,s.pattern)}</select></label><div class="slot-order-actions">${button('move-slot','Subir',null,{cls:'small ghost',extra:attrs+' data-direction="-1"'+(index===0?' disabled':'')})}${button('move-slot','Bajar',null,{cls:'small ghost',extra:attrs+' data-direction="1"'+(index===b.slots.length-1?' disabled':'')})}${button('remove-slot','Quitar hueco','trash',{cls:'small ghost danger',extra:attrs+(b.slots.length===1?' disabled':'')})}</div>`}</div><div class="exercise-controls">${button('pick','Elegir','edit',{cls:'small ghost',extra:attrs,title:`Elegir ejercicio ${index+1} de ${b.name}`})}${button('lock','',s.locked?'lock':'unlock',{cls:`small icon ghost ${s.locked?'lock-on':''}`,extra:attrs+` aria-pressed="${s.locked}"`,title:s.locked?'Desbloquear ejercicio':'Conservar este ejercicio al generar'})}${button('exercise','Cambiar','shuffle',{cls:'small ghost',extra:attrs,title:`Cambiar solo ejercicio ${index+1} de ${b.name}`})}</div></article>`;
 }
-function databaseRows(){const rows=data.database.filter(bankMatch);return rows.length?rows.map(e=>`<div class="db-row ${e.enabled?'':'disabled'}"><div><div class="db-name">${esc(e.name)}</div><div class="db-sub">${e.equipment.length?e.equipment.map(k=>esc(EQUIPMENT[k]||k)).join(' + '):'Sin material'} · ${esc(e.position)} · Complejidad ${MOVEMENT_LEVELS[e.level].toLowerCase()} · ${esc(e.phases.map(k=>PHASES[k]).join(', '))}</div></div><div class="db-pattern"><span class="tag">${esc(PATTERNS[e.pattern])}</span><div class="db-sub">${esc(GROUPS[PATTERN_GROUP[e.pattern]]||'Global')}</div></div><label class="check db-enabled"><input type="checkbox" data-change="exercise-enabled" data-id="${esc(e.id)}" ${e.enabled?'checked':''}>Disponible</label>${button('edit-exercise','Editar','edit',{cls:'small db-edit',extra:`data-id="${esc(e.id)}"`})}</div>`).join(''):'<div class="empty-state"><p>No hay ejercicios que coincidan con estos filtros.</p></div>';}
-function databasePage(){return `<main class="workspace"><div class="page-heading"><div><div class="eyebrow muted" style="margin-bottom:10px">TU BASE DE TRABAJO</div><h1>Banco de ejercicios</h1><p>${data.database.length} ejercicios y variantes editables para todos los bloques.</p></div>${button('add-exercise','Añadir ejercicio','plus',{cls:'primary'})}</div><div class="database-note"><b>Un banco más amplio, organizado por el trabajo que buscas.</b> ${Object.keys(PATTERNS).length} patrones: piernas, glúteos, torso, brazos, core, coordinación y vuelta a la calma. Cada ficha tiene técnica, regresión, material y bloques permitidos. Puedes editarla o desactivarla. El bloque metabólico reúne movimientos básicos, combinados y secuencias dinámicas con tu material.</div><div class="phase-overview">${Object.entries(PHASES).map(([k,v])=>`<button class="phase-stat ${ui.phase===k?'selected':''}" data-action="bank-phase" data-phase="${k}"><b>${data.database.filter(e=>e.phases.includes(k)).length}</b><span>${v}</span></button>`).join('')}</div><p class="hint bank-count-note">Una ficha puede estar disponible en varios bloques. El material adicional, como barra hexagonal, rack, asas, multipower, landmine o banco regulable, solo se usa si lo marcas como disponible. Los ejercicios de complejidad alta requieren seleccionar ese nivel en los criterios.</p><div class="toolbar bank-toolbar"><input class="search" id="dbSearch" aria-label="Buscar ejercicios" placeholder="Buscar: remo, glúteo, curl, plancha…" value="${esc(ui.query)}"><select id="dbPhase" aria-label="Filtrar por bloque"><option value="">Todos los bloques</option>${selectOptions(PHASES,ui.phase)}</select><select id="dbGroup" aria-label="Filtrar por zona"><option value="">Todas las zonas</option>${selectOptions(GROUPS,ui.group)}</select><select id="dbPattern" aria-label="Filtrar por patrón"><option value="">Todos los patrones</option>${selectOptions(PATTERNS,ui.pattern)}</select><select id="dbMaterial" aria-label="Filtrar por material"><option value="">Todo el material</option><option value="none" ${ui.material==='none'?'selected':''}>Sin material</option>${selectOptions(EQUIPMENT,ui.material)}</select>${button('clear-bank','Limpiar filtros',null,{cls:'small ghost'})}</div><p class="bank-results tiny muted" id="bankResultCount">${data.database.filter(bankMatch).length} fichas encontradas</p><div class="panel db-list" id="dbRows">${databaseRows()}</div></main>`;}
+function databaseRows(){const rows=data.database.filter(bankMatch);return rows.length?rows.map(e=>`<div class="db-row ${e.enabled?'':'disabled'}"><div><div class="db-name">${esc(e.name)}${e.id.startsWith('ia-')?' <span class="tag">IA</span>':''}</div><div class="db-sub">${e.equipment.length?e.equipment.map(k=>esc(EQUIPMENT[k]||k)).join(' + '):'Sin material'} · ${esc(e.position)} · Complejidad ${MOVEMENT_LEVELS[e.level].toLowerCase()} · ${esc(e.phases.map(k=>PHASES[k]).join(', '))}</div></div><div class="db-pattern"><span class="tag">${esc(PATTERNS[e.pattern])}</span><div class="db-sub">${esc(GROUPS[PATTERN_GROUP[e.pattern]]||'Global')}</div></div><label class="check db-enabled"><input type="checkbox" data-change="exercise-enabled" data-id="${esc(e.id)}" ${e.enabled?'checked':''}>Disponible</label>${button('edit-exercise','Editar','edit',{cls:'small db-edit',extra:`data-id="${esc(e.id)}"`})}</div>`).join(''):'<div class="empty-state"><p>No hay ejercicios que coincidan con estos filtros.</p></div>';}
+function databasePage(){return `<main class="workspace"><div class="page-heading"><div><div class="eyebrow muted" style="margin-bottom:10px">TU BASE DE TRABAJO</div><h1>Banco de ejercicios</h1><p>${data.database.length} ejercicios y variantes editables para todos los bloques.</p></div><div class="page-actions">${button('ai-bank','Proponer con IA','sparkles',{cls:'accent'})}${button('add-exercise','Añadir ejercicio','plus',{cls:'primary'})}</div></div><div class="database-note"><b>Amplía el banco con propuestas de IA.</b> Elige el bloque y guarda las variantes que quieras incorporar. Cada ficha tiene técnica, regresión, material y bloques permitidos. Puedes editarla o desactivarla.</div><div class="phase-overview">${Object.entries(PHASES).map(([k,v])=>`<button class="phase-stat ${ui.phase===k?'selected':''}" data-action="bank-phase" data-phase="${k}"><b>${data.database.filter(e=>e.phases.includes(k)).length}</b><span>${v}</span></button>`).join('')}</div><p class="hint bank-count-note">Una ficha puede estar disponible en varios bloques. El material adicional, como barra hexagonal, rack, asas, multipower, landmine o banco regulable, solo se usa si lo marcas como disponible. Los ejercicios de complejidad alta requieren seleccionar ese nivel en los criterios.</p><div class="toolbar bank-toolbar"><input class="search" id="dbSearch" aria-label="Buscar ejercicios" placeholder="Buscar: remo, glúteo, curl, plancha…" value="${esc(ui.query)}"><select id="dbPhase" aria-label="Filtrar por bloque"><option value="">Todos los bloques</option>${selectOptions(PHASES,ui.phase)}</select><select id="dbGroup" aria-label="Filtrar por zona"><option value="">Todas las zonas</option>${selectOptions(GROUPS,ui.group)}</select><select id="dbPattern" aria-label="Filtrar por patrón"><option value="">Todos los patrones</option>${selectOptions(PATTERNS,ui.pattern)}</select><select id="dbMaterial" aria-label="Filtrar por material"><option value="">Todo el material</option><option value="none" ${ui.material==='none'?'selected':''}>Sin material</option>${selectOptions(EQUIPMENT,ui.material)}</select>${button('clear-bank','Limpiar filtros',null,{cls:'small ghost'})}</div><p class="bank-results tiny muted" id="bankResultCount">${data.database.filter(bankMatch).length} fichas encontradas</p><div class="panel db-list" id="dbRows">${databaseRows()}</div></main>`;}
 function savedPage(){return `<main class="workspace"><div class="page-heading"><div><div class="eyebrow muted" style="margin-bottom:10px">TU HISTORIAL</div><h1>Sesiones guardadas</h1><p>Recupera una propuesta o evita sus ejercicios al preparar la siguiente.</p></div>${button('export','Copia de seguridad (JSON)','archive')}</div>${!data.saved.length?`<div class="empty-state"><h2>Tu primera sesión empieza aquí.</h2><p>Guarda una propuesta desde «Crear sesión» para encontrarla en este espacio.</p></div>`:`<div class="saved-grid">${data.saved.map(s=>`<article class="saved-card panel"><div class="date">${dateLabel(s.date)}</div><h2>${esc(s.title)}</h2><p class="saved-programming">${isHypertrophyPlan(s)?'Hipertrofia · Método alemán adaptado':`${esc(PROFILES[s.profile]||PROFILES['sin-definir'])} · ${esc(EMPHASES[s.emphasis]||EMPHASES.equilibrado)}`}</p><p class="metrics">${formatTime(s.blocks.reduce((n,b)=>n+b.targetSeconds,0))} min · ${s.blocks.length} bloques · ${s.blocks.reduce((n,b)=>n+b.slots.length,0)} ejercicios</p><div class="saved-actions">${button('restore','Abrir sesión',null,{cls:'small',extra:`data-id="${esc(s.id)}"`})}${button('delete-saved','','trash',{cls:'small ghost danger',extra:`data-id="${esc(s.id)}"`,title:'Eliminar esta sesión guardada'})}</div></article>`).join('')}</div>`}</main>`;}
-function helpPage(){return `<main class="workspace"><div class="page-heading"><div><h1>Cómo funciona</h1><p>Variedad con criterios claros y tiempos que cuadran.</p></div>${button('back-session','Volver a la sesión',null)}</div><article class="help panel"><h2>Hipertrofia y trabajo de sala</h2><p>El programa Hipertrofia abre una sesión full body por series con 20/40 o 30/40. Marca la casilla Sala para incluir las máquinas de una vez. Los bloques con EMS muestran el ciclo, los descansos y la sensación prevista por canal. Cada programa conserva su borrador al cambiar.</p><h2>Generar, conservar, cambiar</h2><p>«Renovar principal» cambia solo los bloques full body. «Variar sesión» cambia los huecos desbloqueados de los demás bloques y conserva los básicos de fuerza. «Renovar fuerza» cambia explícitamente los básicos no fijados. «Elegir» y «Cambiar» permiten sustituir un ejercicio, también si tiene candado: el candado solo lo protege de los cambios de bloque o sesión. Revisa la progresión de los básicos tras 4–6 sesiones; la aplicación no los sustituye automáticamente por haber llegado a esa cifra.</p><p>Puedes mantener el patrón, variar dentro de la zona o recomponer todo el bloque. El cambio aleatorio conserva el reparto de zonas y los patrones básicos presentes en fuerza/full body; el selector manual permite cambiar también el criterio de un hueco. No se repite el mismo ejercicio dentro de la sesión ni se reutilizan los que acabas de sustituir. Se prefieren familias distintas a las que acabas de usar y a las ya presentes; si los filtros dejan pocas opciones, pueden repetirse familias con ejercicios diferentes.</p><h2>Duración del bloque y ON/OFF</h2><p>Escribe, por ejemplo, 7:30 en la duración. Con vueltas automáticas se busca un número entero de vueltas que mantenga el ciclo cerca de tu ON/OFF de referencia. Puedes fijar las vueltas desde «Tiempos y criterios». Se recalculan los segundos para que todos los ejercicios tengan el mismo número de exposiciones.</p><p>Cuando el total no se divide en ciclos iguales de segundos enteros, los segundos restantes aparecen como pausa final sin corriente. Esa pausa se realiza de forma manual; el programa no controla tu equipo EMS. El OFF se incluye también después del último ejercicio.</p><table><thead><tr><th>Ejemplo</th><th>Cálculo</th></tr></thead><tbody><tr><td>5:00 · 3 ejercicios · 2 vueltas</td><td>6 × (30 s ON + 20 s OFF) = 300 s</td></tr><tr><td>7:00 · 4 ejercicios · 2 vueltas fijadas</td><td>8 × (31 s ON + 21 s OFF) + 4 s de pausa = 420 s, con referencia 30/20</td></tr></tbody></table><h2>Perfiles y énfasis</h2><p>En «Criterios de la sesión», Hombre propone torso y Mujer propone piernas/glúteos. El énfasis es editable para ambos perfiles. La selección adapta los patrones del principal al énfasis y a los básicos de fuerza que ya elegiste. Conserva esos básicos, los candados y los tiempos de tus bloques. La plantilla de cinco bloques añade dos huecos al principal cuando hace falta conservar los patrones básicos y el énfasis. El panel muestra el reparto real; los bloqueados y tus elecciones manuales pueden modificarlo.</p><h2>Tiempos metabólicos variables</h2><p>Las referencias de la ficha base son Activación 30/10, Fuerza breve 20/30, Principal 25/20, Core 25/15 y Metabólico 30/20; relajación continua. La nueva opción «Variar ON/OFF al cambiar ejercicios» propone combinaciones por bloque sin superar la proporción de trabajo de esa referencia. La duración, el material y los porcentajes no se cambian al azar. «Fijar ON/OFF» conserva el patrón al regenerar; editar manualmente una referencia también la fija.</p><p>La semana 9 usó circuito; las semanas 10 y 12, parejas; la 11, minibloques. En esas fichas se conservaron los ON/OFF. Las variantes temporales de la aplicación son nuevas opciones de programación. Puedes elegir circuito, parejas o minibloques en los criterios del bloque. Todo el OFF se reserva para recuperar y cambiar de tarea.</p><h2>Porcentajes automáticos por canal</h2><p>La aplicación propone los porcentajes del bloque a partir de sus ejercicios y del énfasis. Cada movimiento identifica grupos principales, de apoyo y de acompañamiento; se toman niveles de tus referencias de semana 12. Cambiar un remo por otra variante con los mismos grupos puede conservar los porcentajes. Sustituir un tirón por un empuje modifica el énfasis de dorsal y pecho cuando cambia el trabajo del conjunto. Los canales que se actualizan quedan resaltados.</p><p>No se requieren entradas manuales: se recalculan al cambiar ejercicios, criterios, perfil o énfasis. La relajación y activación mantienen sus referencias suaves. Son propuestas de programación, no mediciones de reclutamiento ni porcentajes intercambiables entre personas. Se parte del ajuste individual tolerado. EXTRA1 sigue sin uso; gemelos voluntarios.</p><h2>Perfil Principiantes automático</h2><p>Genera una sesión completa de iniciación: ejercicios básicos, duración de partida de 20 minutos, ON/OFF, vueltas y propuesta porcentual de los diez canales. Prioriza apoyos y material sencillo. Conserva los mismos criterios metabólicos de los demás perfiles: activación 30/10, fuerza 20/30, principal 25/20, core 25/15 y metabólico 30/20, con sus variantes y ajuste automático. La relajación es continua. La adaptación está en el volumen, ejercicios, Hz, sensación y porcentajes iniciales.</p><p>Al cambiar ejercicios se recalculan los grupos implicados y sus porcentajes iniciales; una variante muscular equivalente puede conservarlos. Al renovar la rutina se pueden variar los tiempos dentro de los criterios metabólicos compartidos. Puedes fijar ON/OFF, editar la duración y recuperar la referencia base. No se aumenta la dificultad ni la corriente automáticamente con las semanas.</p><p>Los porcentajes son referencias iniciales propias de esta plantilla, inferiores a las propuestas para clientes adaptados; no equivalen a una dosis individual calibrada. El entrenador revisa por canal la sensación y tolerancia del cliente, con orientación inicial cercana a 4/10. Esta plantilla metabólica se usa tras familiarización individual. No es un protocolo automático de primera exposición: el consenso propone fases cortas para esa primera toma de contacto. La distribución de ciclos largos y porcentajes es una decisión de programación. <a href="https://www.frontiersin.org/journals/physiology/articles/10.3389/fphys.2023.1174103/full" target="_blank" rel="noopener noreferrer">Referencia sobre familiarización WB-EMS</a>.</p><h2>Hz e intensidad por bloque</h2><p>Todos los perfiles y énfasis muestran frecuencia, sensación EMS objetivo de 0 a 10 y esfuerzo físico de 0 a 10. Hombre, Mujer y Sin especificar usan las referencias metabólicas de semana 12. Principiantes usa 40 Hz en fuerza, frecuencias no superiores a 50 Hz y sensación de referencia 4/10 en trabajo, con activación y relajación suaves.</p><p>Sensación EMS es la percepción de corriente que compruebas por canal. Esfuerzo físico es la exigencia del ejercicio; en el bloque metabólico adaptado, 7/10 es el máximo físico de referencia. Los porcentajes del dispositivo no se convierten a esta escala. Cambiar un ejercicio no aumenta Hz ni sensación al azar. Las referencias se actualizan al cambiar perfil o tipo de bloque y quedan guardadas con la sesión.</p><h2>Complejidad del movimiento</h2><p>Baja usa movimientos básicos. Media combina dos gestos sencillos. Alta añade secuencias compuestas, cambios de apoyo y coordinación. Al renovar el bloque metabólico se elige primero el nivel más alto compatible con tus criterios. Puedes explorar sus alternativas por familia en «Elegir».</p><h2>Elegir del banco</h2><p>El botón «Elegir» junto a cada ejercicio abre el banco de alternativas compatibles con ese bloque y tus filtros. Puedes buscar por nombre, familia o material. En fuerza, el selector de pierna abre todas las familias de esa zona; un empuje o un tirón empieza en su patrón. Puedes filtrar por familia o abrir todo el bloque. Los botones indican cuántas opciones compatibles hay por zona y por patrón. Elegir una ficha de otro patrón cambia el criterio del hueco. Se evitan duplicados dentro de la sesión.</p><h2>Montar y reorganizar bloques</h2><p>«Añadir ejercicio» abre directamente todas las opciones del bloque y recalcula los tiempos. «Recomponer bloque» cambia la distribución de los gestos entre huecos conservando el reparto de zonas y los candados. Puedes subir o bajar bloques, ordenar los ejercicios desde sus detalles, añadir bloques nuevos o cambiar su tipo desde «Tiempos y criterios». Al cambiar el tipo se usan sus referencias ON/OFF y se conserva la duración; revisa la nueva propuesta antes de aplicarla.</p><h2>La base la controlas tú</h2><p>Puedes añadir o editar las fichas, marcar sus bloques permitidos y desactivar los ejercicios que no quieras usar. Las plantillas iniciales proceden de tus PDF metabólicos de octubre (visual de 6 bloques y semanal de 5). Son puntos de partida editables. El banco inicial contiene ${SEED.length} propuestas para tu revisión.</p><h2>Motor por reglas, sin API de IA</h2><p>Esta primera versión usa selección aleatoria con restricciones. No llama a un modelo generativo ni utiliza una API de pago. No inventa nuevos ejercicios. Propone Hz e intensidad percibida por bloque a partir de las referencias del perfil. El programa no controla el dispositivo; pulso, rampas y ajuste real se revisan presencialmente.</p><h2>Guardado y copias</h2><p>Los cambios se guardan en este navegador. Las sesiones conservan una copia de sus fichas. Para trasladar el trabajo a otro dispositivo, exporta una copia JSON y después impórtala allí. No hay sincronización automática entre dispositivos.</p><p>«Descargar rutina PDF» genera la ficha breve de la sesión para Wiemspro, con los ejercicios y los ajustes de cada bloque.</p></article></main>`;}
+function helpPage(){return `<main class="workspace"><div class="page-heading"><div><h1>Cómo funciona</h1><p>Variedad con criterios claros y tiempos que cuadran.</p></div>${button('back-session','Volver a la sesión',null)}</div><article class="help panel"><h2>Hipertrofia y trabajo de sala</h2><p>El programa Hipertrofia abre una sesión full body por series con 20/40 o 30/40. Marca la casilla Sala para incluir las máquinas de una vez. Los bloques con EMS muestran el ciclo, los descansos y la sensación prevista por canal. Cada programa conserva su borrador al cambiar.</p><h2>Generar, conservar, cambiar</h2><p>«Renovar principal» cambia solo los bloques full body. «Variar sesión» cambia los huecos desbloqueados de los demás bloques y conserva los básicos de fuerza. «Renovar fuerza» cambia explícitamente los básicos no fijados. «Elegir» y «Cambiar» permiten sustituir un ejercicio, también si tiene candado: el candado solo lo protege de los cambios de bloque o sesión. Revisa la progresión de los básicos tras 4–6 sesiones; la aplicación no los sustituye automáticamente por haber llegado a esa cifra.</p><p>Puedes mantener el patrón, variar dentro de la zona o recomponer todo el bloque. El cambio aleatorio conserva el reparto de zonas y los patrones básicos presentes en fuerza/full body; el selector manual permite cambiar también el criterio de un hueco. No se repite el mismo ejercicio dentro de la sesión ni se reutilizan los que acabas de sustituir. Se prefieren familias distintas a las que acabas de usar y a las ya presentes; si los filtros dejan pocas opciones, pueden repetirse familias con ejercicios diferentes.</p><h2>Duración del bloque y ON/OFF</h2><p>Escribe, por ejemplo, 7:30 en la duración. Con vueltas automáticas se busca un número entero de vueltas que mantenga el ciclo cerca de tu ON/OFF de referencia. Puedes fijar las vueltas desde «Tiempos y criterios». Se recalculan los segundos para que todos los ejercicios tengan el mismo número de exposiciones.</p><p>Cuando el total no se divide en ciclos iguales de segundos enteros, los segundos restantes aparecen como pausa final sin corriente. Esa pausa se realiza de forma manual; el programa no controla tu equipo EMS. El OFF se incluye también después del último ejercicio.</p><table><thead><tr><th>Ejemplo</th><th>Cálculo</th></tr></thead><tbody><tr><td>5:00 · 3 ejercicios · 2 vueltas</td><td>6 × (30 s ON + 20 s OFF) = 300 s</td></tr><tr><td>7:00 · 4 ejercicios · 2 vueltas fijadas</td><td>8 × (31 s ON + 21 s OFF) + 4 s de pausa = 420 s, con referencia 30/20</td></tr></tbody></table><h2>Perfiles y énfasis</h2><p>En «Criterios de la sesión», Hombre propone torso y Mujer propone piernas/glúteos. El énfasis es editable para ambos perfiles. La selección adapta los patrones del principal al énfasis y a los básicos de fuerza que ya elegiste. Conserva esos básicos, los candados y los tiempos de tus bloques. La plantilla de cinco bloques añade dos huecos al principal cuando hace falta conservar los patrones básicos y el énfasis. El panel muestra el reparto real; los bloqueados y tus elecciones manuales pueden modificarlo.</p><h2>Tiempos metabólicos variables</h2><p>Las referencias de la ficha base son Activación 30/10, Fuerza breve 20/30, Principal 25/20, Core 25/15 y Metabólico 30/20; relajación continua. La nueva opción «Variar ON/OFF al cambiar ejercicios» propone combinaciones por bloque sin superar la proporción de trabajo de esa referencia. La duración, el material y los porcentajes no se cambian al azar. «Fijar ON/OFF» conserva el patrón al regenerar; editar manualmente una referencia también la fija.</p><p>La semana 9 usó circuito; las semanas 10 y 12, parejas; la 11, minibloques. En esas fichas se conservaron los ON/OFF. Las variantes temporales de la aplicación son nuevas opciones de programación. Puedes elegir circuito, parejas o minibloques en los criterios del bloque. Todo el OFF se reserva para recuperar y cambiar de tarea.</p><h2>Porcentajes automáticos por canal</h2><p>La aplicación propone los porcentajes del bloque a partir de sus ejercicios y del énfasis. Cada movimiento identifica grupos principales, de apoyo y de acompañamiento; se toman niveles de tus referencias de semana 12. Cambiar un remo por otra variante con los mismos grupos puede conservar los porcentajes. Sustituir un tirón por un empuje modifica el énfasis de dorsal y pecho cuando cambia el trabajo del conjunto. Los canales que se actualizan quedan resaltados.</p><p>No se requieren entradas manuales: se recalculan al cambiar ejercicios, criterios, perfil o énfasis. La relajación y activación mantienen sus referencias suaves. Son propuestas de programación, no mediciones de reclutamiento ni porcentajes intercambiables entre personas. Se parte del ajuste individual tolerado. EXTRA1 sigue sin uso; gemelos voluntarios.</p><h2>Perfil Principiantes automático</h2><p>Genera una sesión completa de iniciación: ejercicios básicos, duración de partida de 20 minutos, ON/OFF, vueltas y propuesta porcentual de los diez canales. Prioriza apoyos y material sencillo. Conserva los mismos criterios metabólicos de los demás perfiles: activación 30/10, fuerza 20/30, principal 25/20, core 25/15 y metabólico 30/20, con sus variantes y ajuste automático. La relajación es continua. La adaptación está en el volumen, ejercicios, Hz, sensación y porcentajes iniciales.</p><p>Al cambiar ejercicios se recalculan los grupos implicados y sus porcentajes iniciales; una variante muscular equivalente puede conservarlos. Al renovar la rutina se pueden variar los tiempos dentro de los criterios metabólicos compartidos. Puedes fijar ON/OFF, editar la duración y recuperar la referencia base. No se aumenta la dificultad ni la corriente automáticamente con las semanas.</p><p>Los porcentajes son referencias iniciales propias de esta plantilla, inferiores a las propuestas para clientes adaptados; no equivalen a una dosis individual calibrada. El entrenador revisa por canal la sensación y tolerancia del cliente, con orientación inicial cercana a 4/10. Esta plantilla metabólica se usa tras familiarización individual. No es un protocolo automático de primera exposición: el consenso propone fases cortas para esa primera toma de contacto. La distribución de ciclos largos y porcentajes es una decisión de programación. <a href="https://www.frontiersin.org/journals/physiology/articles/10.3389/fphys.2023.1174103/full" target="_blank" rel="noopener noreferrer">Referencia sobre familiarización WB-EMS</a>.</p><h2>Hz e intensidad por bloque</h2><p>Todos los perfiles y énfasis muestran frecuencia, sensación EMS objetivo de 0 a 10 y esfuerzo físico de 0 a 10. Hombre, Mujer y Sin especificar usan las referencias metabólicas de semana 12. Principiantes usa 40 Hz en fuerza, frecuencias no superiores a 50 Hz y sensación de referencia 4/10 en trabajo, con activación y relajación suaves.</p><p>Sensación EMS es la percepción de corriente que compruebas por canal. Esfuerzo físico es la exigencia del ejercicio; en el bloque metabólico adaptado, 7/10 es el máximo físico de referencia. Los porcentajes del dispositivo no se convierten a esta escala. Cambiar un ejercicio no aumenta Hz ni sensación al azar. Las referencias se actualizan al cambiar perfil o tipo de bloque y quedan guardadas con la sesión.</p><h2>Complejidad del movimiento</h2><p>Baja usa movimientos básicos. Media combina dos gestos sencillos. Alta añade secuencias compuestas, cambios de apoyo y coordinación. Al renovar el bloque metabólico se elige primero el nivel más alto compatible con tus criterios. Puedes explorar sus alternativas por familia en «Elegir».</p><h2>Elegir del banco</h2><p>El botón «Elegir» junto a cada ejercicio abre el banco de alternativas compatibles con ese bloque y tus filtros. Puedes buscar por nombre, familia o material. En fuerza, el selector de pierna abre todas las familias de esa zona; un empuje o un tirón empieza en su patrón. Puedes filtrar por familia o abrir todo el bloque. Los botones indican cuántas opciones compatibles hay por zona y por patrón. Elegir una ficha de otro patrón cambia el criterio del hueco. Se evitan duplicados dentro de la sesión.</p><h2>Montar y reorganizar bloques</h2><p>«Añadir ejercicio» abre directamente todas las opciones del bloque y recalcula los tiempos. «Recomponer bloque» cambia la distribución de los gestos entre huecos conservando el reparto de zonas y los candados. Puedes subir o bajar bloques, ordenar los ejercicios desde sus detalles, añadir bloques nuevos o cambiar su tipo desde «Tiempos y criterios». Al cambiar el tipo se usan sus referencias ON/OFF y se conserva la duración; revisa la nueva propuesta antes de aplicarla.</p><h2>La base la controlas tú</h2><p>Puedes añadir o editar las fichas, marcar sus bloques permitidos y desactivar los ejercicios que no quieras usar. Las plantillas iniciales proceden de tus PDF metabólicos de octubre (visual de 6 bloques y semanal de 5). Son puntos de partida editables. El banco inicial contiene ${SEED.length} propuestas para tu revisión.</p><h2>Propuestas de IA para el banco</h2><p>Abre «Proponer con IA» desde el banco o desde «Elegir» en un ejercicio. Conecta tu cuenta de OpenRouter con el código de autorización y genera variantes para el bloque. Las fichas que elijas se guardan en tu banco. Los cambios de rutina usan las fichas guardadas y los criterios de la sesión.</p><p>Los Hz y la intensidad percibida se calculan a partir de las referencias del perfil. Pulso, rampas y ajuste real se revisan presencialmente.</p><h2>Guardado y copias</h2><p>Los cambios se guardan en este navegador. Las sesiones conservan una copia de sus fichas. Para trasladar el trabajo a otro dispositivo, exporta una copia JSON y después impórtala allí. No hay sincronización automática entre dispositivos.</p><p>«Descargar rutina PDF» genera la ficha breve de la sesión para Wiemspro, con los ejercicios y los ajustes de cada bloque.</p></article></main>`;}
 function render(){root.innerHTML=header()+(ui.page==='database'?databasePage():ui.page==='saved'?savedPage():ui.page==='help'?helpPage():sessionPage())+`<footer class="app-footer"><span>ImpulsaFit · EMS Studio · Bloques flexibles</span><span>${storageError?'No se pudo guardar en este navegador. Exporta una copia.':'Guardado en este navegador · Sin sincronización entre dispositivos'} &nbsp; <button data-action="import">Importar copia</button></span></footer>`;}
 
 document.addEventListener('toggle',event=>{const id=event.target.dataset?.expand;if(id){if(event.target.open)ui.expanded.add(id);else ui.expanded.delete(id);}},true);
@@ -202,6 +210,9 @@ document.addEventListener('change',event=>{
   if(el.id==='chooserFamily'&&ui.chooser){ui.chooser.family=el.value;refreshChooserRows();return;}
   if(el.id==='chooserPattern'&&ui.chooser){ui.chooser.pattern=el.value;ui.chooser.family='';refreshChooserRows();return;}
   if(!type)return;
+  if(type==='ai-block'&&ui.ai&&!ui.ai.pending){
+    ui.ai.blockId=el.value;ui.ai.proposals=[];ui.ai.message='';ui.ai.error=false;renderAiDialog();return;
+  }
   if(type==='hypertrophy-setting')return changeHypertrophySetting(el.dataset.key,Number(el.value),el.dataset.block);
   if(type==='profile')return changeProgramming(el.value,defaultEmphasis(el.value));
   if(type==='emphasis')return changeProgramming(data.profile,el.value);
@@ -252,6 +263,18 @@ document.addEventListener('change',event=>{
 document.addEventListener('click',event=>{
   const el=event.target.closest('[data-action]');if(!el)return;
   const action=el.dataset.action,b=data.blocks.find(b=>b.id===el.dataset.block),s=b?.slots.find(s=>s.id===el.dataset.slot);
+  if(action==='ai-bank')return openAiDialog();
+  if(action==='ai-chooser'&&ui.chooser)return openAiDialog(ui.chooser);
+  if(action==='ai-close')return closeAiDialog();
+  if(action==='ai-connect')return runAiAction('Preparando la conexión…',async state=>{
+    state.authorization=await createAiAuthorization();
+    state.message='';
+  });
+  if(action==='ai-disconnect'&&ui.ai&&!ui.ai.pending){
+    setAiKey('');ui.ai.authorization=null;ui.ai.proposals=[];ui.ai.message='';ui.ai.error=false;renderAiDialog();return;
+  }
+  if(action==='ai-generate')return requestAiProposals();
+  if(action==='ai-accept')return acceptAiProposal(Number(el.dataset.index));
   if(action==='install-app')return installApp();
   if(action==='program')return switchProgram(el.dataset.program);
   if(action==='page'){ui.page=el.dataset.page;render();scrollTo(0,0);return;}
@@ -326,6 +349,19 @@ document.addEventListener('click',event=>{
   }
   if(action==='import'){document.querySelector('#importFile').click();return;}
 });
+aiDialog.addEventListener('cancel',event=>{event.preventDefault();closeAiDialog();});
+aiDialog.addEventListener('submit',event=>{
+  if(event.target.id!=='aiCodeForm'||!ui.ai?.authorization)return;
+  event.preventDefault();
+  const code=String(new FormData(event.target).get('code')||'');
+  return runAiAction('Conectando con OpenRouter…',async(state,signal)=>{
+    const key=await exchangeAiCode(code,state.authorization.verifier,{signal});
+    if(ui.ai!==state)return;
+    setAiKey(key);
+    state.authorization=null;
+    state.message='IA conectada. Ya puedes generar propuestas.';
+  });
+});
 document.querySelector('#importFile').addEventListener('change',async event=>{
   const file=event.target.files[0];if(!file)return;
   try{if(file.size>8_000_000)throw Error('El archivo supera 8 MB.');const imported=upgradeState(JSON.parse(await file.text()));checkpoint();data=imported;data.title=typeof data.title==='string'?data.title.slice(0,140):'Sesión importada';data.notes=typeof data.notes==='string'?data.notes.slice(0,2000):'';commit('Copia importada. Puedes deshacer la importación.');}
@@ -376,7 +412,7 @@ function openChooser(block,slot){
  const initialPattern=isHypertrophyWork(block)?slot.pattern:block.phase==='strength'?(PATTERN_GROUP[slot.pattern]==='piernas'?'zone':slot.pattern):'all';
  ui.chooser={blockId:block.id,slotId:slot.id,pattern:initialPattern,family:'',query:''};
  const dialog=document.querySelector('#chooserDialog');
- dialog.innerHTML=`<div class="dialog-head"><div><div class="eyebrow muted" style="margin-bottom:5px">${esc(block.name)}</div><h2 id="chooserTitle">Elegir ejercicio</h2></div>${button('close-chooser','','close',{cls:'icon ghost',title:'Cerrar selector'})}</div><div class="chooser-filters"><label class="form-field">Buscar<input id="chooserSearch" type="search" placeholder="Nombre, familia o material…" autocomplete="off"></label><label class="form-field">Filtrar opciones<select id="chooserPattern" ${isHypertrophyWork(block)?'disabled':''}><option value="all" ${initialPattern==='all'?'selected':''}>Todo el bloque · todos los patrones</option><option value="zone" ${initialPattern==='zone'?'selected':''}>Misma zona · ${esc(GROUPS[PATTERN_GROUP[slot.pattern]])}</option>${selectOptions(PATTERNS,initialPattern)}</select></label>${(isHypertrophyBlock(block)||['strength','metabolic'].includes(block.phase))?'<label class="form-field chooser-family">Familia de movimiento<select id="chooserFamily" aria-label="Familia de movimiento"></select></label>':''}<p class="hint">Puedes elegir otro ejercicio aunque esté fijado al generar. Elegir otro patrón actualiza el criterio del hueco. Las opciones respetan el material y el nivel técnico seleccionados. ${data.profile==='principiante'?'Perfil Principiantes: solo complejidad básica y material sencillo.':''}</p><div class="chooser-filter-link">${button('chooser-filters','Revisar material y nivel',null,{cls:'small ghost text-button'})}</div></div><div id="chooserScopes" class="chooser-scopes"></div><div class="chooser-count" id="chooserResultCount" role="status"></div><div id="chooserRows" class="chooser-rows"></div>`;
+ dialog.innerHTML=`<div class="dialog-head"><div><div class="eyebrow muted" style="margin-bottom:5px">${esc(block.name)}</div><h2 id="chooserTitle">Elegir ejercicio</h2></div>${button('close-chooser','','close',{cls:'icon ghost',title:'Cerrar selector'})}</div><div class="chooser-filters"><label class="form-field">Buscar<input id="chooserSearch" type="search" placeholder="Nombre, familia o material…" autocomplete="off"></label><label class="form-field">Filtrar opciones<select id="chooserPattern" ${isHypertrophyWork(block)?'disabled':''}><option value="all" ${initialPattern==='all'?'selected':''}>Todo el bloque · todos los patrones</option><option value="zone" ${initialPattern==='zone'?'selected':''}>Misma zona · ${esc(GROUPS[PATTERN_GROUP[slot.pattern]])}</option>${selectOptions(PATTERNS,initialPattern)}</select></label>${(isHypertrophyBlock(block)||['strength','metabolic'].includes(block.phase))?'<label class="form-field chooser-family">Familia de movimiento<select id="chooserFamily" aria-label="Familia de movimiento"></select></label>':''}<p class="hint">Puedes elegir otro ejercicio aunque esté fijado al generar. Elegir otro patrón actualiza el criterio del hueco. Las opciones respetan el material y el nivel técnico seleccionados. ${data.profile==='principiante'?'Perfil Principiantes: solo complejidad básica y material sencillo.':''}</p><div class="chooser-filter-link ai-actions">${button('chooser-filters','Revisar material y nivel',null,{cls:'small ghost text-button'})}${button('ai-chooser','Proponer con IA','sparkles',{cls:'small accent'})}</div></div><div id="chooserScopes" class="chooser-scopes"></div><div class="chooser-count" id="chooserResultCount" role="status"></div><div id="chooserRows" class="chooser-rows"></div>`;
  refreshChooserRows();dialog.showModal();document.querySelector('#chooserSearch').focus();
 }
 function refreshChooserRows(){
@@ -397,7 +433,13 @@ function chooseCandidate(id){
  const candidates=manualCandidates(data.blocks,data.database,data.filters,{...ui.chooser,avoidIds:avoidIds()}),exercise=candidates.find(e=>e.id===id);
  const block=data.blocks.find(b=>b.id===ui.chooser.blockId),slot=block?.slots.find(s=>s.id===ui.chooser.slotId);
  if(!exercise||!slot)return toast('Esta alternativa ya no está disponible. Reabre el selector.',true);
- checkpoint();const before=structuredClone(data.blocks);slot.pattern=exercise.pattern;slot.exerciseId=exercise.id;
+ useExerciseInSlot(slot,exercise);
+}
+function useExerciseInSlot(slot,exercise,isNew=false){
+ checkpoint();
+ const before=structuredClone(data.blocks);
+ if(isNew)data.database.push(exercise);
+ slot.pattern=exercise.pattern;slot.exerciseId=exercise.id;
  const hypertrophy=isHypertrophyPlan(data);
  const varied=hypertrophy
    ? varyHypertrophyTiming(before,data.blocks,{enabled:data.filters.varyTiming===true})
@@ -405,6 +447,124 @@ function chooseCandidate(id){
  data.blocks=varied.blocks;
  document.querySelector('#chooserDialog').close();ui.chooser=null;
  commit(varied.changed?'Ejercicio elegido y ON/OFF renovado. Duración conservada y porcentajes recalculados según los músculos implicados.':hypertrophy?'Ejercicio elegido y reparto muscular recalculado.':'Ejercicio elegido. La duración se conserva.');
+}
+
+function setAiKey(key){
+ aiKey=key;
+ try{
+   if(key)sessionStorage.setItem(AI_CONNECTION,key);
+   else sessionStorage.removeItem(AI_CONNECTION);
+ }catch{}
+}
+function aiContext(state){
+ const block=data.blocks.find(item=>item.id===state.blockId);
+ const slot=block?.slots.find(item=>item.id===state.chooser?.slotId);
+ if(!block||(state.chooser&&!slot))return null;
+ let patterns=[...new Set(block.slots.map(item=>item.pattern))];
+ if(slot){
+   const choice=state.chooser.pattern;
+   patterns=isHypertrophyWork(block)?[slot.pattern]:choice==='all'?null:choice==='zone'
+     ? Object.keys(PATTERNS).filter(key=>PATTERN_GROUP[key]===PATTERN_GROUP[slot.pattern]):[choice];
+ }
+ return {block,slot,patterns,family:state.chooser?.family||''};
+}
+function openAiDialog(chooser=null){
+ const block=chooser?data.blocks.find(item=>item.id===chooser.blockId):
+   data.blocks.find(item=>item.phase===(ui.phase||'main'))||data.blocks[0];
+ if(!block)return;
+ ui.ai={blockId:block.id,chooser:chooser&&{...chooser},authorization:null,pending:null,proposals:[],message:'',error:false};
+ renderAiDialog();
+ aiDialog.showModal();
+}
+function closeAiDialog(){
+ ui.ai?.pending?.abort();
+ ui.ai=null;
+ aiDialog.close();
+}
+function renderAiDialog(){
+ const state=ui.ai;
+ const {block,slot,patterns}=aiContext(state)||{};
+ const busy=state.pending?'disabled':'';
+ const material=data.filters.equipment.map(key=>EQUIPMENT[key]).filter(Boolean).join(' · ');
+ const criteria=slot
+   ? `<p class="tiny muted">${esc(block.name)}${patterns?.length===1?` · ${esc(PATTERNS[patterns[0]])}`:''}</p>`
+   : `<label class="form-field">Bloque de referencia<select data-change="ai-block" ${busy}>${selectOptions(Object.fromEntries(data.blocks.map(item=>[item.id,item.name])),state.blockId)}</select></label>`;
+ const setup=state.authorization
+   ? `<a href="${esc(state.authorization.url)}" target="_blank" rel="noopener noreferrer">Abrir OpenRouter y obtener el código</a>
+      <form id="aiCodeForm" class="ai-connect-form">
+        <label class="form-field">Código de autorización de OpenRouter
+          <input name="code" type="password" maxlength="500" required autocomplete="off" autocapitalize="none" spellcheck="false" ${busy}>
+        </label>
+        <button type="submit" class="primary" ${busy}>Conectar</button>
+      </form>`
+   : button('ai-connect','Conectar IA gratuita','sparkles',{cls:'primary',extra:busy});
+ const actions=aiKey
+   ? `${button('ai-generate',state.proposals.length?'Pedir otras propuestas':'Generar propuestas','sparkles',{cls:'primary',extra:busy})}${button('ai-disconnect','Desconectar IA',null,{cls:'small ghost',extra:busy})}`
+   : setup;
+ aiDialog.innerHTML=`
+   <div class="dialog-head"><h2 id="aiDialogTitle">Proponer ejercicios con IA</h2>${button('ai-close','','close',{cls:'icon ghost',title:'Cerrar propuestas'})}</div>
+   <div class="dialog-body">
+     ${criteria}
+     <p class="tiny muted">Complejidad ${esc(MOVEMENT_LEVELS[data.filters.level].toLowerCase())} · ${esc(material||'Sin material')}</p>
+     ${!aiKey?'<p class="tiny">Conecta tu cuenta de OpenRouter y pega aquí el código que te muestre. La conexión se guarda en esta ventana.</p>':''}
+     <p class="tiny">Usa modelos gratuitos de OpenRouter. Reciben solo criterios de ejercicio y fichas de referencia del banco inicial.</p>
+     <div class="ai-actions">${actions}</div>
+     <p class="tiny ${state.error?'ai-error':'muted'}" role="status">${esc(state.message)}</p>
+   </div>
+   ${state.proposals.length?`<div class="chooser-rows" aria-label="Propuestas de IA">${state.proposals.map((item,index)=>`
+     <article class="chooser-row"><div><h3>${esc(item.name)}</h3>
+     <p class="exercise-meta">${esc(PATTERNS[item.pattern])} · ${esc(item.equipment.map(key=>EQUIPMENT[key]).join(' + ')||'Sin material')} · ${esc(item.position)}</p>
+     <p class="exercise-cue">${esc(item.cue)}</p><p class="chooser-regression">${esc(item.regression)}</p></div>
+     ${button('ai-accept',slot?'Usar en el bloque':'Añadir al banco',null,{cls:'small',extra:`data-index="${index}" ${busy}`})}</article>`).join('')}</div>`:''}`;
+}
+async function runAiAction(message,operation){
+ const state=ui.ai;
+ if(!state||state.pending)return;
+ const controller=new AbortController();
+ const deadline=setTimeout(()=>controller.abort(),60000);
+ state.pending=controller;state.message=message;state.error=false;
+ renderAiDialog();
+ try{await operation(state,controller.signal);}
+ catch(error){
+   if(ui.ai!==state)return;
+   if(error.status===401)setAiKey('');
+   if(state.authorization&&[400,401,403,404].includes(error.status))state.authorization=null;
+   state.message=error.message;state.error=true;
+ }finally{
+   clearTimeout(deadline);
+   if(ui.ai===state){state.pending=null;renderAiDialog();}
+ }
+}
+function requestAiProposals(){
+ return runAiAction('Generando propuestas…',async(state,signal)=>{
+   const context=aiContext(state);
+   if(!context)throw Error('El bloque cambió. Abre de nuevo el selector.');
+   const {block}=context;
+   const references=proposalReferences(block,data.filters,data.database,context);
+   const known=[...data.database,...state.proposals];
+   state.proposals=await generateExerciseProposals(block,data.filters,references,known,{key:aiKey,signal});
+   state.message=state.proposals.length?'Revisa el movimiento y el material antes de incorporarlo.':'La IA no devolvió variantes nuevas compatibles. Puedes pedir otras propuestas.';
+ });
+}
+function acceptAiProposal(index){
+ const state=ui.ai,proposal=state?.proposals[index],context=state&&aiContext(state);
+ if(!proposal||!context||state.pending)return;
+ const {block,slot,patterns}=context;
+ const duplicated=data.database.some(item=>exerciseNameKey(item.name)===exerciseNameKey(proposal.name));
+ if(duplicated||data.database.length>=3000||(patterns&&!patterns.includes(proposal.pattern))||
+   !eligible(proposal,block,{pattern:proposal.pattern},data.filters)){
+   state.message='Esta propuesta ya existe, no cabe en el banco o no cumple los criterios del bloque.';
+   state.error=true;renderAiDialog();return;
+ }
+ const item={...proposal,id:'ia-'+uid()};
+ if(slot){
+   closeAiDialog();useExerciseInSlot(slot,item,true);return;
+ }
+ checkpoint();
+ data.database.push(item);
+ state.proposals.splice(index,1);
+ state.message='Ficha añadida al banco de ejercicios.';state.error=false;
+ commit();renderAiDialog();
 }
 
 function blockScopeControls(b){
