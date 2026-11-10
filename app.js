@@ -9,7 +9,7 @@ import {PHASE_PATTERNS,createBlock,changePhase,moveItem,insertBlock,recommendedO
 import {stimulationReference,withStimulationProposals} from './stimulation.js';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
 import {routineSheet,renderRoutinePdf} from './routine-pdf.js';
-import {createAiAuthorization,exchangeAiCode,exerciseNameKey,generateBlockProposals,generateExerciseProposals,prepareAiBlockUpdate,proposalReferences} from './ai-exercises.js?v=ai-blocks';
+import {createAiAuthorization,exchangeAiCode,exerciseNameKey,generateBlockProposals,generateExerciseProposals,prepareAiBlockUpdate,proposalReferences} from './ai-exercises.js?v=ai-respaldo';
 import {
   HYPERTROPHY_TEMPLATE,HYPERTROPHY_ON,HYPERTROPHY_OFF,HYPERTROPHY_HZ,HYPERTROPHY_REST,HYPERTROPHY_LIMIT,HYPERTROPHY_GROUPS,
   initialHypertrophyBlocks,isHypertrophyPlan,isHypertrophyBlock,isHypertrophyWork,plannedEmsSeconds,

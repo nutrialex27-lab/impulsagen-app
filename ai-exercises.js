@@ -9,6 +9,8 @@ const AUTH='/api/v1/auth/keys';
 const PROPOSAL_COUNT=5;
 const CATALOG_CONTEXT_LIMIT=12;
 const MODEL='openrouter/free';
+const FREE_FALLBACK_MODELS=['google/gemma-4-26b-a4b-it:free','nvidia/nemotron-3-ultra-550b-a55b:free'];
+const PRIMARY_TIMEOUT=27000;
 
 export const exerciseNameKey=name=>name.normalize('NFD').replace(/\p{M}/gu,'')
   .toLocaleLowerCase('es').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
@@ -49,18 +51,35 @@ export async function createAiAuthorization(){
   return {url:url.href,verifier};
 }
 
-function routerError(path,status){
-  let message='OpenRouter no pudo completar la solicitud. Vuelve a intentarlo en unos minutos.';
+function routerError(path,status,failure,retryAfter){
+  const dataPolicy=[404,503].includes(status)&&/matching your data policy/i.test(failure?.message??'');
+  const contentFiltered=failure?.metadata?.error_type==='content_policy_violation'||Array.isArray(failure?.metadata?.reasons);
+  const retryable=path===CHAT&&!dataPolicy&&!contentFiltered&&!retryAfter&&([400,404,408,422].includes(status)||status>=500);
+  let message=`OpenRouter no pudo completar la solicitud (${status}).`;
   if(path===AUTH&&[400,401,403,404].includes(status)){
     message='El código ya no es válido. Pide otro código en OpenRouter.';
   }else if(status===401){
-    message='Vuelve a conectar la IA para generar propuestas.';
+    message='La conexión de OpenRouter ha caducado o es inválida (401). Vuelve a conectar la IA.';
+  }else if(status===402){
+    message='OpenRouter rechazó la solicitud por el estado de los créditos de la cuenta o de la clave (402).';
+  }else if(contentFiltered){
+    message=`OpenRouter filtró esta solicitud (${status}).`;
+  }else if(status===403){
+    message='OpenRouter bloqueó la solicitud por los permisos o límites de la cuenta (403).';
   }else if(status===429){
-    message='El modelo gratuito está ocupado o has alcanzado su límite. Vuelve a intentarlo más tarde.';
-  }else if([402,404].includes(status)){
-    message='Ahora mismo no hay un modelo gratuito disponible para esta solicitud.';
+    message='El modelo gratuito está ocupado o has alcanzado su límite (429). Vuelve a intentarlo más tarde.';
+  }else if(dataPolicy){
+    message=`La política de datos de OpenRouter no ofrece un modelo compatible para esta solicitud (${status}).`;
+  }else if(status===404){
+    message='Ahora mismo no hay un modelo gratuito disponible para esta solicitud (404).';
+  }else if(status===408){
+    message='OpenRouter tardó demasiado en responder (408). Vuelve a intentarlo.';
+  }else if([400,422].includes(status)){
+    message=`OpenRouter rechazó el formato de la solicitud (${status}).`;
+  }else if(status>=500){
+    message=`OpenRouter o el proveedor del modelo no está disponible temporalmente (${status}).`;
   }
-  return Object.assign(new Error(message),{status});
+  return Object.assign(new Error(message),{status,retryable});
 }
 
 async function openRouter(path,body,{key,signal,request=fetch}={}){
@@ -72,20 +91,21 @@ async function openRouter(path,body,{key,signal,request=fetch}={}){
       body:JSON.stringify(body)
     });
   }catch{
-    if(signal?.aborted)throw Error('La conexión ha tardado demasiado. Vuelve a intentarlo.');
+    if(signal?.aborted)throw routerError(path,408);
     throw Error('No se pudo conectar con OpenRouter. Comprueba la conexión y vuelve a intentarlo.');
   }
-  if(!response.ok)throw routerError(path,response.status);
   let answer;
   try{answer=await response.json();}
   catch{
-    if(signal?.aborted)throw Error('La conexión ha tardado demasiado. Vuelve a intentarlo.');
-    throw routerError(path,502);
+    if(signal?.aborted)throw routerError(path,408);
+    if(response.ok)throw routerError(path,502);
   }
   const failure=answer?.error??answer?.choices?.[0]?.error;
+  const retryAfter=response.headers.get('retry-after');
+  if(!response.ok)throw routerError(path,response.status,failure,retryAfter);
   if(failure){
     const status=Number(failure.code);
-    throw routerError(path,Number.isInteger(status)&&status>=400&&status<=599?status:502);
+    throw routerError(path,Number.isInteger(status)&&status>=400&&status<=599?status:502,failure,retryAfter);
   }
   return answer;
 }
@@ -123,14 +143,17 @@ function proposalRequest(block,filters,references,compact,targets){
   };
   if(targets)context.huecos=targets.map(({number,bases})=>({slot:number,bases:[...bases]}));
   return {
-    model:MODEL,max_tokens:compact?6144:4096,temperature:.8,reasoning:{enabled:false},
-    provider:{require_parameters:!compact,max_price:{prompt:0,completion:0,request:0}},
-    response_format:compact?{type:'json_object'}:{type:'json_schema',json_schema:{name:'impulsafit_exercises',strict:true,schema:{
-      type:'object',required:['exercises'],additionalProperties:false,
-      properties:{exercises:{type:'array',items:{
-        type:'object',properties,required:Object.keys(properties),additionalProperties:false
+    ...(compact?{models:FREE_FALLBACK_MODELS}:{
+      model:MODEL,temperature:.8,reasoning:{enabled:false},
+      response_format:{type:'json_schema',json_schema:{name:'impulsafit_exercises',strict:true,schema:{
+        type:'object',required:['exercises'],additionalProperties:false,
+        properties:{exercises:{type:'array',items:{
+          type:'object',properties,required:Object.keys(properties),additionalProperties:false
+        }}}
       }}}
-    }}},
+    }),
+    max_tokens:compact?6144:4096,
+    provider:{require_parameters:!compact,max_price:{prompt:0,completion:0,request:0}},
     messages:[
       {role:'system',content:[
         'Propón hasta '+count+' variantes reales de ejercicio en español para que un entrenador las revise.',
@@ -208,20 +231,29 @@ export async function generateExerciseProposals(block,filters,references,databas
   if(!key)throw Error('Conecta la IA antes de generar propuestas.');
   if(!references.length)throw Error('No hay fichas de referencia compatibles. Revisa el material, la complejidad o el patrón.');
   const proposals=[];
+  const primarySignal=signal&&typeof AbortSignal.any==='function'&&typeof AbortSignal.timeout==='function'
+    ? AbortSignal.any([signal,AbortSignal.timeout(PRIMARY_TIMEOUT)])
+    : signal;
   let remaining=targets,readable=false;
   for(const compact of [false,true]){
     if(signal?.aborted){
       if(proposals.length)return proposals;
-      throw Error('La conexión ha tardado demasiado. Vuelve a intentarlo.');
+      throw routerError(CHAT,408);
     }
     try{
       const allowed=remaining?new Set(remaining.flatMap(target=>[...target.bases])):null;
       const offered=allowed?references.filter(exercise=>allowed.has(exercise.id)):references;
-      const answer=await openRouter(CHAT,proposalRequest(block,filters,offered,compact,remaining),{key,signal,request});
+      const answer=await openRouter(CHAT,proposalRequest(block,filters,offered,compact,remaining),{
+        key,signal:compact?signal:primarySignal,request
+      });
       const output=parseExerciseAnswer(answer);
       if(!output)continue;
-      if(!remaining)return readExerciseProposals(output,block,offered,database);
       readable=true;
+      if(!remaining){
+        const batch=readExerciseProposals(output,block,offered,database);
+        if(batch.length)return batch;
+        continue;
+      }
       const batch=readExerciseProposals(output,block,offered,[...database,...proposals],remaining);
       proposals.push(...batch);
       const filled=new Set(batch.map(proposal=>proposal.slotId));
@@ -229,9 +261,7 @@ export async function generateExerciseProposals(block,filters,references,databas
       if(!remaining.length)return proposals;
     }catch(error){
       if(compact&&proposals.length&&error.status!==401)return proposals;
-      // A simpler format can use a different free endpoint. Preserve account,
-      // quota and moderation errors without sending another request.
-      if(compact||signal?.aborted||![400,404,422,502,503].includes(error.status))throw error;
+      if(compact||signal?.aborted||!error.retryable)throw error;
     }
   }
   if(readable)return proposals;
