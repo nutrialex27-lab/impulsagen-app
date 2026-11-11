@@ -1,6 +1,6 @@
 import {PHASES} from './data.js?v=banco-cardio';
 import {applyEmphasis} from './profiles.js';
-import {eligible,generate,validateSession} from './engine.js?v=banco-cardio';
+import {eligible,generate,validateSession} from './engine.js?v=rutina-parametros';
 import {PHASE_PATTERNS} from './builder.js';
 import {NOVICE_TIMINGS,noviceTiming,upgradeNoviceBlocks} from './novice-presets.js';
 
@@ -18,6 +18,7 @@ export function beginnerTimings(blocks){
   for(const phase of Object.keys(budget))if(!counts.has(phase)){budget[receiver]+=budget[phase];budget[phase]=0;}
   const used=new Map();for(const b of result){const i=used.get(b.phase)||0,n=counts.get(b.phase);used.set(b.phase,i+1);
     b.targetSeconds=Math.floor(budget[b.phase]/n)+(i<budget[b.phase]%n?1:0);
+    delete b.durationReference;
     Object.assign(b,beginnerBlock(b,{preserveDuration:true}));
   }
   return result;

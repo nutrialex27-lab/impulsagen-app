@@ -85,7 +85,10 @@ export function withChannelProposals(blocks,database,profile,emphasis){
 }
 export function resetMetabolicTiming(block,{beginner=false,resetDuration=false}={}){
  if(beginner)return noviceTiming(block,{preserveDuration:!resetDuration});
- const r=METABOLIC_TIMINGS[block.phase];return {...structuredClone(block),targetSeconds:resetDuration?r.seconds:block.targetSeconds,preferredOn:r.on,preferredOff:r.off,roundMode:'auto',rounds:1,timingPolicy:'metabolic',timingLocked:false};
+ const r=METABOLIC_TIMINGS[block.phase];
+ const result={...structuredClone(block),targetSeconds:resetDuration?r.seconds:block.targetSeconds,preferredOn:r.on,preferredOff:r.off,roundMode:'auto',rounds:1,timingPolicy:'metabolic',timingLocked:false};
+ if(resetDuration)delete result.durationReference;
+ return result;
 }
 export function sequenceGroups(block){
  const order=block.slots.map((_,i)=>i+1);

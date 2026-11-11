@@ -1,11 +1,11 @@
-import {formatTime,solveTiming} from './engine.js';
-import {CHANNELS,proposeChannels,sequenceGroups} from './metabolic.js';
-import {stimulationReference} from './stimulation.js';
+import {formatTime,solveTiming} from './engine.js?v=rutina-parametros';
+import {CHANNELS,proposeChannels,sequenceGroups} from './metabolic.js?v=rutina-parametros';
+import {stimulationReference,formatRamp} from './stimulation.js?v=rutina-parametros';
 import {EMPHASES,PROFILES} from './profiles.js';
 import {
   HYPERTROPHY_GROUPS,hypertrophyMuscleProposal,hypertrophyStimulation,
   isHypertrophyPlan,isHypertrophyWork
-} from './hypertrophy.js';
+} from './hypertrophy.js?v=rutina-parametros';
 
 const range=([min,max])=>min===max?String(min):`${min}-${max}`;
 const join=parts=>parts.filter(Boolean).join('  ·  ');
@@ -43,11 +43,14 @@ export function routineSheet(plan){
       const {on,off,rounds,cycles,buffer,extraRest}=timing;
       const voluntary=block.timingPolicy==='no-ems';
       const continuous=!voluntary&&block.phase==='recovery';
-      const {hz,ems,rpe}=hypertrophy?hypertrophyStimulation(block):stimulationReference(block.phase,profile);
+      const {hz,ems,rpe,rampUp,rampDown}=hypertrophy
+        ? hypertrophyStimulation(block)
+        : stimulationReference(block.phase,profile,block.stimulation);
       const intervals=voluntary?'Sin EMS':join([
         `${hz} Hz`,continuous?`Continuo · ${on} s por intervalo`:`ON ${on} s`,`OFF ${off} s`,
         hypertrophy?count(rounds,'serie','series'):count(rounds,'vuelta','vueltas'),
-        !hypertrophy&&count(cycles,'intervalo','intervalos')
+        !hypertrophy&&count(cycles,'intervalo','intervalos'),
+        `Rampa subida ${formatRamp(rampUp)} / bajada ${formatRamp(rampDown)}`
       ]);
       const rest=join([
         hypertrophy&&!voluntary&&rounds>1&&`Entre series ${block.restSeconds} s`,

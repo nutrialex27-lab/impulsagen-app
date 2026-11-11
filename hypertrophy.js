@@ -132,8 +132,11 @@ export function hypertrophyChannels(exercise){
 
 export function hypertrophyStimulation(block){
   const work=isHypertrophyWork(block);
+  const ramp=work?0.8:null;
   return {
     hz:work?block.hz:0,
+    rampUp:ramp,
+    rampDown:ramp,
     ems:work?[5,6]:[0,0],
     rpe:PHYSICAL_EFFORT[block.phase]||[3,4]
   };
