@@ -1,7 +1,4 @@
-import {EQUIPMENT,MOVEMENT_LEVELS,PATTERNS,PHASES,SEED} from './data.js';
-import {eligible,strengthBasic} from './engine.js';
-import {GYM_EQUIPMENT} from './gym-catalog.js';
-import {isHypertrophyBlock} from './hypertrophy.js';
+import {EQUIPMENT,FAMILY_LABELS,MOVEMENT_LEVELS,PATTERNS,PHASES,SEED,exerciseInBankPhase} from './data.js?v=banco-cardio';
 
 const ROOT='https://openrouter.ai';
 const CHAT='/api/v1/chat/completions';
@@ -15,28 +12,39 @@ const PRIMARY_TIMEOUT=27000;
 export const exerciseNameKey=name=>name.normalize('NFD').replace(/\p{M}/gu,'')
   .toLocaleLowerCase('es').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 
-export function proposalReferences(block,filters,database,{patterns=null,family='',rng=Math.random,limit=CATALOG_CONTEXT_LIMIT,blockCriteria=false}={}){
+const SEARCH_WORDS=new Set(['a','al','con','de','del','el','en','entre','la','las','los','no','para','un','una','y']);
+const searchTerms=query=>[...new Set(exerciseNameKey(query).split(' ')
+  .filter(word=>word&&!SEARCH_WORDS.has(word))
+  .map(word=>word.length>4&&word.endsWith('s')?word.slice(0,-1):word))];
+const materialTerms=new Set(Object.values(EQUIPMENT).flatMap(searchTerms));
+
+function searchableExercise(exercise){
+  const material=exercise.equipment.map(key=>EQUIPMENT[key]).join(' ')||'Sin material';
+  return exerciseNameKey([exercise.name,exercise.family,FAMILY_LABELS[exercise.family],
+    PATTERNS[exercise.pattern],material,exercise.cue].join(' '));
+}
+
+export function matchesExerciseQuery(exercise,query){
+  const terms=searchTerms(query);
+  if(!terms.length)return true;
+  const searchable=searchableExercise(exercise);
+  return terms.every(word=>searchable.includes(word));
+}
+
+export function proposalReferences(database,query,phase=''){
+  const terms=searchTerms(query);
+  if(!terms.length)return [];
+  const movementTerms=terms.filter(word=>!materialTerms.has(word));
   const enabled=new Set(database.filter(exercise=>exercise.enabled).map(exercise=>exercise.id));
-  const candidates=SEED.filter(exercise=>enabled.has(exercise.id)&&
-    (!patterns||patterns.includes(exercise.pattern))&&(!family||exercise.family===family)&&
-    (!blockCriteria||block.phase!=='strength'||strengthBasic(exercise))&&
-    eligible(exercise,block,{pattern:exercise.pattern},filters));
-  for(let i=candidates.length-1;i>0;i--){
-    const index=Math.floor(rng()*(i+1));
-    [candidates[i],candidates[index]]=[candidates[index],candidates[i]];
-  }
-  if(blockCriteria&&block.phase==='metabolic')candidates.sort((a,b)=>b.level-a.level);
-  if(blockCriteria&&isHypertrophyBlock(block)&&filters.equipment.includes('sala')){
-    const usesMachine=exercise=>exercise.equipment.some(key=>GYM_EQUIPMENT.includes(key));
-    candidates.sort((a,b)=>Number(usesMachine(b))-Number(usesMachine(a)));
-  }
-  const byFamily=new Map();
-  for(const exercise of candidates){
-    const key=exercise.pattern+'-'+exercise.family;
-    if(!byFamily.has(key))byFamily.set(key,exercise);
-  }
-  const distinct=[...byFamily.values()],selected=new Set(distinct);
-  return [...distinct,...candidates.filter(exercise=>!selected.has(exercise))].slice(0,limit);
+  const matches=SEED.filter(exercise=>enabled.has(exercise.id)&&
+    (phase?exerciseInBankPhase(exercise,phase):exercise.phases.some(value=>exerciseInBankPhase(exercise,value))))
+    .map(exercise=>{
+      const searchable=searchableExercise(exercise);
+      if(movementTerms.length&&!movementTerms.some(word=>searchable.includes(word)))return {exercise,score:0};
+      return {exercise,score:terms.filter(word=>searchable.includes(word)).length};
+    });
+  const best=Math.max(0,...matches.map(match=>match.score));
+  return best?matches.filter(match=>match.score===best).slice(0,CATALOG_CONTEXT_LIMIT).map(match=>match.exercise):[];
 }
 
 export async function createAiAuthorization(){
@@ -123,25 +131,23 @@ export async function exchangeAiCode(code,verifier,options){
   return key;
 }
 
-function proposalRequest(block,filters,references,compact,targets){
-  const count=targets?.length??(compact?3:PROPOSAL_COUNT);
+function proposalRequest(query,phase,references,compact){
+  const count=compact?3:PROPOSAL_COUNT;
   const properties={
     base:{type:'string',enum:references.map(exercise=>exercise.id)},
     name:{type:'string'},cue:{type:'string'},regression:{type:'string'}
   };
-  if(targets)properties.slot={type:'integer',enum:targets.map(target=>target.number)};
   const context={
-    bloque:PHASES[block.phase],
-    trabajoConEMS:block.timingPolicy!=='no-ems',
-    iniciacion:Boolean(filters.beginner),
+    ejercicioBuscado:query,
+    bloque:PHASES[phase]||'Cualquier bloque compatible',
     referencias:references.map(exercise=>({
       base:exercise.id,nombre:exercise.name,patron:PATTERNS[exercise.pattern],
       complejidad:MOVEMENT_LEVELS[exercise.level],material:exercise.equipment.map(key=>EQUIPMENT[key]),
+      bloques:exercise.phases.filter(value=>exerciseInBankPhase(exercise,value)).map(value=>PHASES[value]),
       posicion:exercise.position,permiteBrazosSobreCabeza:exercise.flags.includes('overhead'),
       permiteDesplazamiento:exercise.flags.includes('desplazamiento')
     }))
   };
-  if(targets)context.huecos=targets.map(({number,bases})=>({slot:number,bases:[...bases]}));
   return {
     ...(compact?{models:FREE_FALLBACK_MODELS}:{
       model:MODEL,temperature:.8,reasoning:{enabled:false},
@@ -156,11 +162,11 @@ function proposalRequest(block,filters,references,compact,targets){
     provider:{require_parameters:!compact,max_price:{prompt:0,completion:0,request:0}},
     messages:[
       {role:'system',content:[
-        'Propón hasta '+count+' variantes reales de ejercicio en español para que un entrenador las revise.',
-        ...(targets?['Devuelve una variante distinta por cada hueco. Indica su número en slot y usa solo una base de la lista de ese hueco.']:[]),
+        'Propón hasta '+count+' fichas de ejercicios en español que respondan a ejercicioBuscado.',
+        'Trata ejercicioBuscado como una descripción del movimiento o grupo muscular. Omite propuestas que no encajen con lo que se busca.',
         'Para cada propuesta elige una base y conserva su patrón, complejidad, postura y exactamente el mismo material.',
         'Conserva los límites de brazos y desplazamiento. Cambia la ejecución de forma útil, no te limites a cambiar el nombre.',
-        'Si es iniciación, mantén los apoyos estables y el gesto sencillo. Para la vuelta a la calma usa movimientos suaves.',
+        'Para la vuelta a la calma usa movimientos suaves. En el bloque metabólico propone secuencias rítmicas con apoyos controlados.',
         'Evita saltos, gestos balísticos, cargas máximas y movimientos que exijan material adicional.',
         'Devuelve solo un objeto JSON con la propiedad exercises, una lista de objetos con base, name, cue y regression.',
         'Usa nombres concisos, una frase de técnica y una variante más sencilla con el mismo material.',
@@ -201,107 +207,53 @@ function proposalText(value,max){
   return trimmed.length<=max&&!/[<>\u0000-\u001f]|https?:|electrodos?|\b(?:Hz|mA)\b/i.test(trimmed)?trimmed:'';
 }
 
-export function readExerciseProposals(output,block,references,database,targets=null){
+export function readExerciseProposals(output,references,database){
   if(!Array.isArray(output?.exercises))throw Error('El modelo devolvió una respuesta incompleta. Pide otras propuestas.');
   const names=new Set([...SEED,...database].map(exercise=>exerciseNameKey(exercise.name)));
   const bases=new Map(references.map(exercise=>[exercise.id,exercise]));
-  const targetByNumber=new Map(targets?.map(target=>[target.number,target]));
-  const filled=new Set();
   const proposals=[];
-  for(const item of output.exercises.slice(0,targets?targets.length*2:PROPOSAL_COUNT)){
+  for(const item of output.exercises.slice(0,PROPOSAL_COUNT)){
     const base=bases.get(item?.base);
-    const target=targetByNumber.get(item?.slot);
-    if(targets&&(!target||!target.bases.has(item?.base)||filled.has(target.slotId)))continue;
     const name=proposalText(item?.name,140),cue=proposalText(item?.cue,350),regression=proposalText(item?.regression,230);
     const normalized=exerciseNameKey(name);
     if(!base||!normalized||!cue||!regression||names.has(normalized))continue;
     const {pattern,family,level,equipment,position,flags,components}=base;
+    const phases=base.phases.filter(value=>exerciseInBankPhase(base,value));
+    if(!phases.length)continue;
     proposals.push(structuredClone({
-      name,pattern,family,level,equipment,position,flags,cue,regression,enabled:true,phases:[block.phase],
-      ...(target?{slotId:target.slotId}:{}),
+      name,pattern,family,level,equipment,position,flags,cue,regression,enabled:true,phases,
       ...(components?{components}:{})
     }));
     names.add(normalized);
-    if(target)filled.add(target.slotId);
   }
   return proposals;
 }
 
-export async function generateExerciseProposals(block,filters,references,database,{key,signal,request,targets=null}={}){
+export async function generateExerciseProposals(database,{query='',phase='',key,signal,request,exclude=[]}={}){
   if(!key)throw Error('Conecta la IA antes de generar propuestas.');
-  if(!references.length)throw Error('No hay fichas de referencia compatibles. Revisa el material, la complejidad o el patrón.');
-  const proposals=[];
+  const search=query.trim().slice(0,140);
+  if(!searchTerms(search).length)throw Error('Escribe el ejercicio o el grupo muscular que buscas.');
+  const references=proposalReferences(database,search,phase);
+  if(!references.length)throw Error('No encontré una ficha de referencia. Prueba con el nombre del movimiento o con cualquier bloque.');
   const primarySignal=signal&&typeof AbortSignal.any==='function'&&typeof AbortSignal.timeout==='function'
     ? AbortSignal.any([signal,AbortSignal.timeout(PRIMARY_TIMEOUT)])
     : signal;
-  let remaining=targets,readable=false;
+  let readable=false;
   for(const compact of [false,true]){
-    if(signal?.aborted){
-      if(proposals.length)return proposals;
-      throw routerError(CHAT,408);
-    }
+    if(signal?.aborted)throw routerError(CHAT,408);
     try{
-      const allowed=remaining?new Set(remaining.flatMap(target=>[...target.bases])):null;
-      const offered=allowed?references.filter(exercise=>allowed.has(exercise.id)):references;
-      const answer=await openRouter(CHAT,proposalRequest(block,filters,offered,compact,remaining),{
+      const answer=await openRouter(CHAT,proposalRequest(search,phase,references,compact),{
         key,signal:compact?signal:primarySignal,request
       });
       const output=parseExerciseAnswer(answer);
       if(!output)continue;
       readable=true;
-      if(!remaining){
-        const batch=readExerciseProposals(output,block,offered,database);
-        if(batch.length)return batch;
-        continue;
-      }
-      const batch=readExerciseProposals(output,block,offered,[...database,...proposals],remaining);
-      proposals.push(...batch);
-      const filled=new Set(batch.map(proposal=>proposal.slotId));
-      remaining=remaining.filter(target=>!filled.has(target.slotId));
-      if(!remaining.length)return proposals;
+      const proposals=readExerciseProposals(output,references,[...database,...exclude]);
+      if(proposals.length)return proposals;
     }catch(error){
-      if(compact&&proposals.length&&error.status!==401)return proposals;
       if(compact||signal?.aborted||!error.retryable)throw error;
     }
   }
-  if(readable)return proposals;
+  if(readable)return [];
   throw Error('El modelo gratuito dejó la tanda incompleta tras dos intentos. Vuelve a generar las propuestas.');
-}
-
-export async function generateBlockProposals(block,filters,database,{exclude=[],...options}={}){
-  const references=new Map();
-  const byPattern=new Map();
-  const targets=block.slots.flatMap((slot,index)=>{
-    if(slot.locked)return [];
-    if(!byPattern.has(slot.pattern)){
-      byPattern.set(slot.pattern,proposalReferences(block,filters,database,{
-        patterns:[slot.pattern],limit:3,blockCriteria:true
-      }));
-    }
-    const matching=byPattern.get(slot.pattern);
-    for(const exercise of matching)references.set(exercise.id,exercise);
-    return matching.length?[{number:index+1,slotId:slot.id,bases:new Set(matching.map(exercise=>exercise.id))}]:[];
-  });
-  if(block.slots.every(slot=>slot.locked))throw Error('Desbloquea un ejercicio para renovar el bloque.');
-  if(!targets.length)throw Error('No hay referencias para los huecos libres. Revisa el material y la complejidad.');
-  const proposals=await generateExerciseProposals(block,filters,[...references.values()],[...database,...exclude],{...options,targets});
-  return proposals.sort((a,b)=>block.slots.findIndex(slot=>slot.id===a.slotId)-block.slots.findIndex(slot=>slot.id===b.slotId));
-}
-
-export function prepareAiBlockUpdate(block,filters,database,proposals,createId){
-  if(!proposals.length||database.length+proposals.length>3000)return null;
-  const names=new Set(database.map(exercise=>exerciseNameKey(exercise.name)));
-  const replacements=new Map();
-  for(const {slotId,...exercise} of proposals){
-    const slot=block.slots.find(item=>item.id===slotId);
-    const name=exerciseNameKey(exercise.name);
-    if(!slot||slot.locked||replacements.has(slotId)||names.has(name)||!eligible(exercise,block,slot,filters))return null;
-    names.add(name);
-    replacements.set(slotId,{...exercise,id:createId()});
-  }
-  const slots=block.slots.map(slot=>{
-    const replacement=replacements.get(slot.id);
-    return replacement?{...slot,exerciseId:replacement.id}:slot;
-  });
-  return {block:{...block,slots},exercises:[...replacements.values()]};
 }

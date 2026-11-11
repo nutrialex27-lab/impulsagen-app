@@ -1,6 +1,6 @@
 import {EXTRA_ROWS} from './catalog.js';
 import {STRENGTH_RECORDS,FAMILY_LABELS as STRENGTH_FAMILY_LABELS} from './strength-catalog.js';
-import {METABOLIC_RECORDS,METABOLIC_FAMILY_LABELS} from './metabolic-catalog.js';
+import {METABOLIC_RECORDS,METABOLIC_FAMILY_LABELS,METABOLIC_CATALOG_VERSION} from './metabolic-catalog.js?v=banco-cardio';
 import {GYM_RECORDS} from './gym-catalog.js';
 export const FAMILY_LABELS={...STRENGTH_FAMILY_LABELS,...METABOLIC_FAMILY_LABELS};
 export const MOVEMENT_LEVELS={1:'Baja',2:'Media',3:'Alta'};
@@ -15,7 +15,15 @@ export const PATTERNS = {
 export const PHASES = { activation:'Activación', strength:'Fuerza breve', main:'Full body', core:'Core', metabolic:'Metabólico', recovery:'Vuelta a la calma' };
 export const EQUIPMENT = { banco:'Banco', step:'Step', mancuernas:'Mancuernas', kettlebell:'Kettlebell', banda:'Banda con anclaje', barra:'Barra', disco:'Disco', balon:'Balón', colchoneta:'Colchoneta', minibanda:'Minibanda', polea:'Polea', trx:'TRX', fitball:'Fitball',hexagonal:'Barra hexagonal',rack:'Rack con soportes y topes',bancoAjustable:'Banco regulable',paralelas:'Asas para flexiones',multipower:'Multipower',landmine:'Anclaje landmine' };
 export const DEFAULT_EQUIPMENT=['banco','step','mancuernas','kettlebell','banda','barra','disco','balon','colchoneta'];
+EQUIPMENT.step='Step / cajón bajo';
+EQUIPMENT.conos='Conos';
+EQUIPMENT.comba='Comba';
 EQUIPMENT.sala='Sala';
+// Retired built-in exercises remain valid in saved sessions.
+export function exerciseInBankPhase(exercise,phase){
+  return exercise.phases.includes(phase)&&
+    (phase!=='metabolic'||exercise.catalogVersion===undefined||exercise.catalogVersion>=METABOLIC_CATALOG_VERSION);
+}
 export const GROUPS={torso:'Torso',piernas:'Piernas / glúteos',core:'Core',global:'Global',movilidad:'Movilidad / calma'};
 export const PATTERN_GROUP={rodilla:'piernas',cadera:'piernas',flexionrodilla:'piernas',abduccion:'piernas',gemelo:'piernas',empuje:'torso',tiron:'torso',biceps:'torso',triceps:'torso',hombro:'torso',antirotacion:'core',antiextension:'core',antilateral:'core',flexiontronco:'core',locomocion:'global',global:'global',movilidad:'movilidad',respiracion:'movilidad'};
 const rows = [

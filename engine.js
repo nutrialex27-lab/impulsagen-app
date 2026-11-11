@@ -1,4 +1,4 @@
-import {PATTERN_GROUP} from './data.js';
+import {PATTERN_GROUP,exerciseInBankPhase} from './data.js?v=banco-cardio';
 import {METABOLIC_TIMINGS} from './metabolic.js';
 import {NOVICE_TIMINGS} from './novice-presets.js';
 import {validStimulation} from './stimulation.js';
@@ -48,6 +48,7 @@ export function eligible(exercise,block,slot,filters) {
   return exercise.enabled && exercise.pattern===slot.pattern && exercise.phases.includes(block.phase) && exercise.level<=filters.level && (!filters.beginner||beginnerSuitable(exercise)) && exercise.equipment.every(hasMaterial) && (!filters.noFloor||!['suelo','tumbado'].includes(exercise.position)) && (!filters.noOverhead||!exercise.flags.includes('overhead')) && (!filters.noTravel||!exercise.flags.includes('desplazamiento')) && hypertrophyExerciseSuitable(exercise,block);
 }
 export function alternativeEligible(exercise,block,slot,filters,scope='pattern') {
+  if(!exerciseInBankPhase(exercise,block.phase))return false;
   if(isHypertrophyWork(block)&&exercise.pattern!==slot.pattern)return false;
   if(!eligible(exercise,block,{...slot,pattern:exercise.pattern},filters))return false;
   if(scope==='block')return true;

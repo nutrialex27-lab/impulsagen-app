@@ -1,6 +1,6 @@
-import {PHASES} from './data.js';
+import {PHASES} from './data.js?v=banco-cardio';
 import {applyEmphasis} from './profiles.js';
-import {eligible,generate,validateSession} from './engine.js';
+import {eligible,generate,validateSession} from './engine.js?v=banco-cardio';
 import {PHASE_PATTERNS} from './builder.js';
 import {NOVICE_TIMINGS,noviceTiming,upgradeNoviceBlocks} from './novice-presets.js';
 
