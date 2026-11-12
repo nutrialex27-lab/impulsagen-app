@@ -1,6 +1,6 @@
-import {solveTiming} from './engine.js?v=programas-ems';
+import {roundBlockDurations,solveTiming} from './engine.js?v=minutos-enteros';
 import {METABOLIC_TIMINGS,varyMetabolicTiming} from './metabolic.js?v=tiempos-bloques';
-import {isHypertrophyBlock,isHypertrophyWork,varyHypertrophyTiming} from './hypertrophy.js?v=rutina-parametros';
+import {HYPERTROPHY_LIMIT,isHypertrophyBlock,isHypertrophyWork,plannedEmsSeconds,varyHypertrophyTiming} from './hypertrophy.js?v=rutina-parametros';
 import {wiemsproProgram} from './wiemspro.js?v=programas-ems';
 
 export const METABOLIC_SESSION_SECONDS=35*60;
@@ -23,9 +23,9 @@ const hasFixedTiming=block=>block.timingLocked||block.roundMode==='manual'
   ||block.timingPolicy==='pending'||(block.timingPolicy==='custom'&&!wiemsproProgram(block));
 const canPlanWeeklyBlock=block=>Object.hasOwn(WEEKLY_RANGES,block.phase)&&!hasFixedTiming(block);
 
-function weeklyBlockOptions(block,{flexible=false}={}){
+function weeklyBlockOptions(block){
   const current=solveTiming(block);
-  const fixed=current.error?[]:[{block,timing:current}];
+  const fixed=current.error||block.targetSeconds%60!==0?[]:[{block,timing:current}];
   if(!canPlanWeeklyBlock(block))return fixed;
   const [min,max]=WEEKLY_RANGES[block.phase];
   const reference=METABOLIC_TIMINGS[block.phase];
@@ -33,11 +33,7 @@ function weeklyBlockOptions(block,{flexible=false}={}){
   const cycles=program?[[program.on,program.off]]:reference.variants;
   const options=[];
   for(const [on,off] of cycles){
-    const durations=new Set();
-    for(const step of (flexible?[1]:[30,block.slots.length*(on+off)])){
-      for(let seconds=Math.ceil(min/step)*step;seconds<=max;seconds+=step)durations.add(seconds);
-    }
-    for(const seconds of durations){
+    for(let seconds=min;seconds<=max;seconds+=60){
       const candidate={...block,targetSeconds:seconds};
       if(!program){
         candidate.preferredOn=on;
@@ -98,19 +94,9 @@ function bestWeeklyPlan(blocks,choices,rng){
 function varyWeeklyMetabolic(blocks,rng){
   const choices=blocks.map(block=>weeklyBlockOptions(block));
   const exact=bestWeeklyPlan(blocks,choices,rng);
-  if(exact?.changed&&exact.work<=METABOLIC_ON_REFERENCE)return exact.blocks;
-
-  // An edited duration can leave seconds outside the regular 30-second steps.
-  const adaptable=blocks.filter(canPlanWeeklyBlock);
-  const flex=adaptable.find(block=>block.phase==='main')??adaptable[0];
-  if(flex){
-    choices[blocks.indexOf(flex)]=weeklyBlockOptions(flex,{flexible:true});
-    const adjusted=bestWeeklyPlan(blocks,choices,rng);
-    if(adjusted?.changed&&(!exact||adjusted.work<=Math.max(METABOLIC_ON_REFERENCE,exact.work)))return adjusted.blocks;
-  }
   if(exact)return exact.blocks;
   const total=blocks.reduce((seconds,block)=>seconds+block.targetSeconds,0);
-  if(total===METABOLIC_SESSION_SECONDS&&blocks.every(block=>!solveTiming(block).error))return blocks;
+  if(total===METABOLIC_SESSION_SECONDS&&blocks.every(block=>block.targetSeconds%60===0&&!solveTiming(block).error))return blocks;
   return null;
 }
 
@@ -125,18 +111,18 @@ export function updateMetabolicDurationDefaults(blocks){
   });
   const wasFullSession=blocks.reduce((seconds,block)=>seconds+block.targetSeconds,0)===METABOLIC_SESSION_SECONDS;
   if(wasFullSession&&updated.some((block,index)=>block!==blocks[index])){
-    return varyWeeklyMetabolic(updated,()=>0)??updated;
+    return varyWeeklyMetabolic(updated,()=>0)??blocks;
   }
   return updated;
 }
 
-const DURATION_SHIFTS=[15,30,-15,-30];
+const DURATION_SHIFTS=[60,-60];
 const pick=(options,rng)=>options[Math.floor(rng()*options.length)];
 
 function shiftDuration(block,shift,{beginner,rng}){
-  const durationReference=block.durationReference??block.targetSeconds;
+  const durationReference=block.durationReference%60===0?block.durationReference:block.targetSeconds;
   const targetSeconds=block.targetSeconds+shift;
-  if(targetSeconds<1||targetSeconds>7200||Math.abs(targetSeconds-durationReference)>30)return null;
+  if(targetSeconds<60||targetSeconds>7200||Math.abs(targetSeconds-durationReference)>60)return null;
   const adjusted={...block,durationReference,targetSeconds};
   const options={forceBlock:block.id,beginner,solve:solveTiming,rng};
   const vary=isHypertrophyBlock(block)?varyHypertrophyTiming:varyMetabolicTiming;
@@ -172,20 +158,27 @@ function redistributeDuration(blocks,indices,options){
 }
 
 export function varySessionProgramming(blocks,{profile,hypertrophy=false,rng=Math.random}={}){
-  if(!hypertrophy&&profile!=='principiante')return varyWeeklyMetabolic(blocks,rng);
-  const available=blocks.flatMap((block,index)=>
+  const weekly=!hypertrophy&&profile!=='principiante';
+  const minutes=roundBlockDurations(blocks,{
+    skip:block=>block.timingLocked||(weekly&&canPlanWeeklyBlock(block)),
+    group:block=>hypertrophy&&isHypertrophyWork(block)
+  });
+  if(weekly)return varyWeeklyMetabolic(minutes,rng);
+  if(minutes.some(block=>block.targetSeconds%60!==0))return null;
+  if(hypertrophy&&plannedEmsSeconds(minutes)>HYPERTROPHY_LIMIT)return null;
+  const available=minutes.flatMap((block,index)=>
     block.timingLocked||block.timingPolicy==='pending'||solveTiming(block).error?[]:[index]
   );
   const adjustable=available.filter(index=>{
-    const block=blocks[index];
+    const block=minutes[index];
     return isHypertrophyBlock(block)||block.timingPolicy!=='custom'&&block.roundMode==='auto';
   });
-  const updated=[...blocks];
+  const updated=[...minutes];
   const options={beginner:profile==='principiante',rng};
   if(hypertrophy){
     // Keep the time budget for the EMS phase separate from voluntary exercise.
-    redistributeDuration(updated,adjustable.filter(index=>isHypertrophyWork(blocks[index])),options);
-    redistributeDuration(updated,adjustable.filter(index=>!isHypertrophyWork(blocks[index])),options);
+    redistributeDuration(updated,adjustable.filter(index=>isHypertrophyWork(minutes[index])),options);
+    redistributeDuration(updated,adjustable.filter(index=>!isHypertrophyWork(minutes[index])),options);
   }else{
     redistributeDuration(updated,adjustable,options);
   }

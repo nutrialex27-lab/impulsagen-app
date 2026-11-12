@@ -7,8 +7,9 @@ import {GYM_EQUIPMENT} from './gym-catalog.js';
 import {HYPERTROPHY_LIMIT,isHypertrophyPlan,isHypertrophyBlock,isHypertrophyWork,solveHypertrophyTiming,validHypertrophyBlock,hypertrophyExerciseSuitable,plannedEmsSeconds} from './hypertrophy.js?v=rutina-parametros';
 export const VARIATION_MODES={zone:'Misma zona · más variedad',pattern:'Mismo patrón · más específico',block:'Todo el bloque · recomponer'};
 export function formatTime(s) { return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; }
-export function parseTime(value) {
+export function parseTime(value,{wholeMinutes=false}={}) {
   const s=String(value).trim().replace(',','.');
+  if(wholeMinutes&&!/^\d+(?::00)?$/.test(s))return null;
   if(/^\d{1,3}:\d{2}$/.test(s)) {const [m,x]=s.split(':').map(Number);if(x<60&&m*60+x>0&&m*60+x<=7200)return m*60+x;}
   if(/^\d+(\.\d+)?$/.test(s)) {const v=Math.round(Number(s)*60);if(v>0&&v<=7200)return v;}
   return null;
@@ -44,6 +45,24 @@ export function solveTiming(block) {
     if(!best||score<best.score)best={rounds,cycles,on,off,buffer,total:cycles*(on+off)+buffer,work:cycles*on,score};
   }
   return best||{error:'La duración no permite completar todas las vueltas. Amplía el bloque o reduce las vueltas.'};
+}
+export function roundBlockDurations(blocks,{skip=()=>false,group=()=>0}={}){
+  // Keep complementary fractions within the same time budget when both minute choices fit.
+  const differences=new Map();
+  return blocks.map(block=>{
+    const seconds=block.targetSeconds;
+    if(seconds%60===0||skip(block))return block;
+    const key=group(block),difference=differences.get(key)??0;
+    const lower=Math.floor(seconds/60)*60,target=seconds-difference;
+    const candidate=[lower,lower+60]
+      .filter(value=>value>=60&&value<=7200)
+      .sort((a,b)=>Math.abs(a-target)-Math.abs(b-target))
+      .map(targetSeconds=>({...block,targetSeconds}))
+      .find(option=>!solveTiming(option).error);
+    if(!candidate)return block;
+    differences.set(key,difference+candidate.targetSeconds-seconds);
+    return candidate;
+  });
 }
 export function beginnerSuitable(exercise){
   return exercise.level===1&&!exercise.flags.some(f=>['overhead','desplazamiento'].includes(f))&&!exercise.equipment.some(m=>['barra','hexagonal','rack','multipower','landmine','trx','fitball'].includes(m))&&!['talonpunta','pasov','pasovbrazos','diagonal','linea','marchacarga'].includes(exercise.family);

@@ -1,6 +1,6 @@
 import {PHASES} from './data.js?v=banco-cardio';
 import {applyEmphasis} from './profiles.js';
-import {eligible,generate,validateSession} from './engine.js?v=programas-ems';
+import {eligible,generate,roundBlockDurations,validateSession} from './engine.js?v=minutos-enteros';
 import {PHASE_PATTERNS} from './builder.js?v=programas-ems';
 import {NOVICE_TIMINGS,noviceTiming,upgradeNoviceBlocks} from './novice-presets.js';
 
@@ -22,7 +22,7 @@ export function beginnerTimings(blocks){
     delete b.emsProgram;
     Object.assign(b,beginnerBlock(b,{preserveDuration:true}));
   }
-  return result;
+  return roundBlockDurations(result);
 }
 export function adaptBeginner(blocks,database,filters,{emphasis='equilibrado',resetTiming=true,avoidIds=[]}={}){
   const nextFilters=beginnerFilters(filters,{entering:resetTiming});

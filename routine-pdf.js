@@ -1,7 +1,7 @@
 import {formatTime,solveTiming} from './engine.js?v=programas-ems';
 import {CHANNELS,proposeChannels,sequenceGroups} from './metabolic.js?v=programas-ems';
 import {stimulationForBlock,formatRamp} from './stimulation.js?v=programas-ems';
-import {metabolicWorkSummary} from './session-variation.js?v=programas-ems';
+import {metabolicWorkSummary} from './session-variation.js?v=minutos-enteros';
 import {EMPHASES,PROFILES} from './profiles.js';
 import {
   HYPERTROPHY_GROUPS,hypertrophyMuscleProposal,hypertrophyStimulation,
@@ -75,7 +75,7 @@ export function routineSheet(plan){
         : !hypertrophy&&!voluntary?'Comprobar ancho de pulso en Wiemspro':'';
       return {
         heading:`${String(index+1).padStart(2,'0')}   ${block.name}`,
-        duration:formatTime(timing.total),
+        duration:timing.total%60===0?`${timing.total/60} min`:formatTime(timing.total),
         intervals,effort,rest,order,
         program:program?`Wiemspro · ${program.name}`:'',
         pulse,
