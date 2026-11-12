@@ -1,5 +1,5 @@
 import {PHASES} from './data.js';
-import {METABOLIC_TIMINGS} from './metabolic.js';
+import {METABOLIC_TIMINGS} from './metabolic-presets.js?v=tiempos-bloques';
 export const PHASE_PATTERNS={activation:['locomocion','rodilla','tiron'],strength:['rodilla','empuje'],main:['cadera','rodilla','tiron','empuje'],core:['antirotacion','antiextension'],metabolic:['locomocion','global'],recovery:['movilidad','respiracion']};
 const REFERENCES=Object.fromEntries(Object.entries(METABOLIC_TIMINGS).map(([k,v])=>[k,[v.on,v.off]]));
 export const PHASE_ORDER=['activation','strength','main','core','metabolic','recovery'];

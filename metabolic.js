@@ -1,10 +1,11 @@
 // Reference: ImpulsaFit weekly metabolic routines S9-S12. The additional
 // lower-duty variants below are new programming options, not historical claims.
 import {NOVICE_TIMINGS,NOVICE_CHANNELS,NOVICE_LEVELS,noviceTiming} from './novice-presets.js';
-import {METABOLIC_TIMINGS} from './metabolic-presets.js';
+import {METABOLIC_TIMINGS} from './metabolic-presets.js?v=tiempos-bloques';
 import {wiemsproProgram} from './wiemspro.js?v=programas-ems';
-export {METABOLIC_TIMINGS} from './metabolic-presets.js';
-export const PROGRAMMING_VERSION=4;
+export {METABOLIC_TIMINGS} from './metabolic-presets.js?v=tiempos-bloques';
+export const PHASE_ORDER_VERSION=4;
+export const PROGRAMMING_VERSION=5;
 export const CHANNELS=['PIERNAS','ISQUIO','GLÚTEOS','LUMBAR','DORSAL','TRAPECIO','ABDOM.','PECHO','BRAZO','EXTRA1'];
 const activation=[48,50,52,30,42,35,45,38,35,0],core=[30,32,38,32,40,30,65,35,32,0],metabolic=[60,62,65,35,58,45,60,55,50,0],recovery=[25,25,28,20,22,18,20,20,18,0];
 const torso=[55,55,58,35,68,50,60,66,60,0],legStrength=[65,68,70,35,58,42,60,55,48,0],legMain=[68,68,72,35,55,42,60,52,48,0];

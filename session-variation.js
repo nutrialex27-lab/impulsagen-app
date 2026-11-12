@@ -1,16 +1,13 @@
 import {solveTiming} from './engine.js?v=programas-ems';
-import {METABOLIC_TIMINGS,varyMetabolicTiming} from './metabolic.js?v=programas-ems';
+import {METABOLIC_TIMINGS,varyMetabolicTiming} from './metabolic.js?v=tiempos-bloques';
 import {isHypertrophyBlock,isHypertrophyWork,varyHypertrophyTiming} from './hypertrophy.js?v=rutina-parametros';
 import {wiemsproProgram} from './wiemspro.js?v=programas-ems';
 
 export const METABOLIC_SESSION_SECONDS=35*60;
-// Intermittent ON in the base 35-minute ImpulsaFit session.
+// Intermittent ON planning reference for the 35-minute ImpulsaFit session.
 export const METABOLIC_ON_REFERENCE=17*60+10;
-const WEEKLY_RANGES={
-  activation:[240,360],main:[480,900],
-  core:[180,360],metabolic:[180,450],recovery:[180,300]
-};
-const WORK_PHASES=['main','core','metabolic'];
+const WEEKLY_RANGES={main:[480,960],core:[180,360]};
+const DEFAULT_DURATION_PHASES=['activation','strength','recovery'];
 
 export function metabolicWorkSummary(blocks,timings=blocks.map(solveTiming)){
   let work=0,continuous=0;
@@ -22,8 +19,9 @@ export function metabolicWorkSummary(blocks,timings=blocks.map(solveTiming)){
   return {work,continuous};
 }
 
-const canPlanWeeklyBlock=block=>block.phase!=='strength'&&!block.timingLocked&&block.roundMode==='auto'
-  &&(block.timingPolicy!=='custom'||wiemsproProgram(block))&&block.timingPolicy!=='pending';
+const hasFixedTiming=block=>block.timingLocked||block.roundMode==='manual'
+  ||block.timingPolicy==='pending'||(block.timingPolicy==='custom'&&!wiemsproProgram(block));
+const canPlanWeeklyBlock=block=>Object.hasOwn(WEEKLY_RANGES,block.phase)&&!hasFixedTiming(block);
 
 function weeklyBlockOptions(block,{flexible=false}={}){
   const current=solveTiming(block);
@@ -32,16 +30,17 @@ function weeklyBlockOptions(block,{flexible=false}={}){
   const [min,max]=WEEKLY_RANGES[block.phase];
   const reference=METABOLIC_TIMINGS[block.phase];
   const program=wiemsproProgram(block);
-  const continuous=block.phase==='recovery';
-  const cycles=program?[[program.on,program.off]]
-    : WORK_PHASES.includes(block.phase)?reference.variants:[[reference.on,reference.off]];
+  const cycles=program?[[program.on,program.off]]:reference.variants;
   const options=[];
   for(const [on,off] of cycles){
-    const step=continuous||flexible?1:block.slots.length*(on+off);
-    for(let seconds=Math.ceil(min/step)*step;seconds<=max;seconds+=step){
+    const durations=new Set();
+    for(const step of (flexible?[1]:[30,block.slots.length*(on+off)])){
+      for(let seconds=Math.ceil(min/step)*step;seconds<=max;seconds+=step)durations.add(seconds);
+    }
+    for(const seconds of durations){
       const candidate={...block,targetSeconds:seconds};
       if(!program){
-        candidate.preferredOn=continuous?seconds:on;
+        candidate.preferredOn=on;
         candidate.preferredOff=off;
         candidate.timingPolicy='metabolic';
       }
@@ -49,7 +48,8 @@ function weeklyBlockOptions(block,{flexible=false}={}){
       if(!timing.error)options.push({block:candidate,timing});
     }
   }
-  return options.length?options:fixed;
+  if(!options.length)return fixed;
+  return block.targetSeconds<min||block.targetSeconds>max?[...options,...fixed]:options;
 }
 
 function bestWeeklyPlan(blocks,choices,rng){
@@ -67,9 +67,7 @@ function bestWeeklyPlan(blocks,choices,rng){
       const changed=block.targetSeconds!==blocks[index].targetSeconds;
       const cycleReference=wiemsproProgram(block)||reference;
       const standardCycle=phase!=='recovery'&&timing.on===cycleReference.on&&timing.off===cycleReference.off;
-      const score=rng()*1.6+Number(standardCycle)*0.45
-        +(WORK_PHASES.includes(phase)&&changed?0.65:0)
-        +(phase==='activation'&&!changed?0.5:0)-timing.buffer/30;
+      const score=rng()*1.6+Number(standardCycle)*0.45-timing.buffer/30;
       return {block,work:phase==='recovery'?0:timing.work,changed,score};
     });
     for(const plan of plans.values()){
@@ -102,9 +100,8 @@ function varyWeeklyMetabolic(blocks,rng){
   const exact=bestWeeklyPlan(blocks,choices,rng);
   if(exact?.changed&&exact.work<=METABOLIC_ON_REFERENCE)return exact.blocks;
 
-  // A custom session with a fixed or missing recovery block can need an
-  // adjusted cycle in one block to absorb seconds left by the other full rounds.
-  const adaptable=blocks.filter(block=>canPlanWeeklyBlock(block)&&block.phase!=='recovery');
+  // An edited duration can leave seconds outside the regular 30-second steps.
+  const adaptable=blocks.filter(canPlanWeeklyBlock);
   const flex=adaptable.find(block=>block.phase==='main')??adaptable[0];
   if(flex){
     choices[blocks.indexOf(flex)]=weeklyBlockOptions(flex,{flexible:true});
@@ -115,6 +112,22 @@ function varyWeeklyMetabolic(blocks,rng){
   const total=blocks.reduce((seconds,block)=>seconds+block.targetSeconds,0);
   if(total===METABOLIC_SESSION_SECONDS&&blocks.every(block=>!solveTiming(block).error))return blocks;
   return null;
+}
+
+export function updateMetabolicDurationDefaults(blocks){
+  const updated=blocks.map(block=>{
+    if(!DEFAULT_DURATION_PHASES.includes(block.phase)||block.timingPolicy==='beginner'||hasFixedTiming(block))return block;
+    const targetSeconds=METABOLIC_TIMINGS[block.phase].seconds;
+    if(block.targetSeconds===targetSeconds)return block;
+    const adjusted={...block,targetSeconds};
+    if(block.phase==='recovery')adjusted.preferredOn=targetSeconds;
+    return solveTiming(adjusted).error?block:adjusted;
+  });
+  const wasFullSession=blocks.reduce((seconds,block)=>seconds+block.targetSeconds,0)===METABOLIC_SESSION_SECONDS;
+  if(wasFullSession&&updated.some((block,index)=>block!==blocks[index])){
+    return varyWeeklyMetabolic(updated,()=>0)??updated;
+  }
+  return updated;
 }
 
 const DURATION_SHIFTS=[15,30,-15,-30];

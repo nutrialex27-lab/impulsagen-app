@@ -2,6 +2,7 @@ import {EXTRA_ROWS} from './catalog.js';
 import {STRENGTH_RECORDS,FAMILY_LABELS as STRENGTH_FAMILY_LABELS} from './strength-catalog.js';
 import {METABOLIC_RECORDS,METABOLIC_FAMILY_LABELS,METABOLIC_CATALOG_VERSION} from './metabolic-catalog.js?v=banco-cardio';
 import {GYM_RECORDS} from './gym-catalog.js';
+import {METABOLIC_TIMINGS} from './metabolic-presets.js?v=tiempos-bloques';
 export const FAMILY_LABELS={...STRENGTH_FAMILY_LABELS,...METABOLIC_FAMILY_LABELS};
 export const MOVEMENT_LEVELS={1:'Baja',2:'Media',3:'Alta'};
 export const PATTERNS = {
@@ -100,21 +101,24 @@ const toRecord=(r,id,catalogVersion)=>({id,name:r[0],pattern:r[1],family:r[2],ph
 const normalize=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
 const existingNames=new Set(rows.map(r=>normalize(r[0])));
 export const SEED = rows.map((r,i)=>toRecord(r,`base-${i+1}`,1)).concat(EXTRA_ROWS.map((r,i)=>toRecord(r,`catalog-${String(i+1).padStart(3,'0')}`,2)).concat(STRENGTH_RECORDS,METABOLIC_RECORDS,GYM_RECORDS).filter(e=>{const name=normalize(e.name);if(existingNames.has(name))return false;existingNames.add(name);return true;}));
-const block=(id,name,phase,seconds,on,off,patterns)=>({id,name,phase,targetSeconds:seconds,preferredOn:on,preferredOff:off,roundMode:'auto',rounds:1,timingPolicy:'metabolic',sequence:phase==='main'?'pairs':'circuit',notes:'',slots:patterns.map((pattern,i)=>({id:`${id}-${i}`,pattern,exerciseId:null,locked:false}))});
+const block=(phase,name,patterns,seconds=METABOLIC_TIMINGS[phase].seconds)=>{
+  const {on,off}=METABOLIC_TIMINGS[phase];
+  return {id:phase,name,phase,targetSeconds:seconds,preferredOn:phase==='recovery'?seconds:on,preferredOff:off,roundMode:'auto',rounds:1,timingPolicy:'metabolic',sequence:phase==='main'?'pairs':'circuit',notes:'',slots:patterns.map((pattern,i)=>({id:`${phase}-${i}`,pattern,exerciseId:null,locked:false}))};
+};
 export function makeTemplate(type='visual') {
   if(type==='weekly') return [
-    block('activation','Activación','activation',300,30,10,['locomocion','rodilla','tiron']),
-    block('main','Full body','main',900,25,20,['rodilla','cadera','tiron','empuje']),
-    block('core','Core','core',360,25,15,['antirotacion','antiextension']),
-    block('metabolic','Metabólico','metabolic',360,30,20,['locomocion','global','global']),
-    block('recovery','Vuelta a la calma','recovery',180,180,0,['respiracion'])
+    block('activation','Activación',['locomocion','rodilla','tiron']),
+    block('main','Full body',['rodilla','cadera','tiron','empuje'],900),
+    block('core','Core',['antirotacion','antiextension'],360),
+    block('metabolic','Metabólico',['locomocion','global','global'],360),
+    block('recovery','Vuelta a la calma',['respiracion'])
   ];
   return [
-    block('activation','Activación','activation',240,30,10,['locomocion','rodilla','tiron']),
-    block('strength','Fuerza breve','strength',300,20,30,['rodilla','empuje']),
-    block('main','Full body','main',720,25,20,['cadera','rodilla','tiron','empuje']),
-    block('core','Core','core',240,25,15,['antirotacion','antiextension']),
-    block('metabolic','Metabólico','metabolic',300,30,20,['locomocion','global']),
-    block('recovery','Vuelta a la calma','recovery',300,300,0,['respiracion'])
+    block('activation','Activación',['locomocion','rodilla','tiron']),
+    block('strength','Fuerza breve',['rodilla','empuje']),
+    block('main','Full body',['cadera','rodilla','tiron','empuje']),
+    block('core','Core',['antirotacion','antiextension']),
+    block('metabolic','Metabólico',['locomocion','global']),
+    block('recovery','Vuelta a la calma',['respiracion'])
   ];
 }

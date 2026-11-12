@@ -1,12 +1,13 @@
-import {SEED,PATTERNS,PHASES,EQUIPMENT,PATTERN_GROUP} from './data.js?v=banco-cardio';
+import {SEED,PATTERNS,PHASES,EQUIPMENT,PATTERN_GROUP} from './data.js?v=tiempos-bloques';
 import {PROFILES,EMPHASES} from './profiles.js';
 import {validateBackup,eligible,alternativeEligible} from './engine.js?v=programas-ems';
-import {migrateProgramming,PROGRAMMING_VERSION} from './metabolic.js?v=programas-ems';
+import {migrateProgramming,PHASE_ORDER_VERSION,PROGRAMMING_VERSION} from './metabolic.js?v=tiempos-bloques';
 import {upgradeNoviceBlocks} from './novice-presets.js';
-import {recommendedOrder} from './builder.js';
+import {recommendedOrder} from './builder.js?v=tiempos-bloques';
+import {updateMetabolicDurationDefaults} from './session-variation.js?v=tiempos-bloques';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
 import {METABOLIC_CATALOG_VERSION} from './metabolic-catalog.js?v=banco-cardio';
-import {isHypertrophyBlock,isHypertrophyWork} from './hypertrophy.js';
+import {isHypertrophyBlock,isHypertrophyPlan,isHypertrophyWork} from './hypertrophy.js';
 export const CATALOG_VERSION=METABOLIC_CATALOG_VERSION;
 export function upgradeState(input){
   validateBackup(input,PATTERNS,PHASES,EQUIPMENT);
@@ -21,10 +22,18 @@ export function upgradeState(input){
   else if(data.filters.beginner)data.filters.beginner=false;
   data.title=typeof data.title==='string'?data.title.slice(0,140):'Metabólica · Sesión nueva';
   data.notes=typeof data.notes==='string'?data.notes.slice(0,2000):'';
-  if((data.programmingVersion||0)<PROGRAMMING_VERSION){
-    if(!data.programmingVersion)data.blocks=migrateProgramming(data.blocks,data.profile,data.emphasis);
+  const oldProgramming=data.programmingVersion||0;
+  if(oldProgramming<PHASE_ORDER_VERSION){
+    if(!oldProgramming)data.blocks=migrateProgramming(data.blocks,data.profile,data.emphasis);
     if(data.profile==='principiante')data.blocks=upgradeNoviceBlocks(data.blocks);
     data.blocks=recommendedOrder(data.blocks);
+  }
+  if(oldProgramming<PROGRAMMING_VERSION){
+    if(data.profile!=='principiante'&&!isHypertrophyPlan(data))data.blocks=updateMetabolicDurationDefaults(data.blocks);
+    const metabolicDraft=data.drafts?.metabolic;
+    if(metabolicDraft&&metabolicDraft.profile!=='principiante'){
+      metabolicDraft.blocks=updateMetabolicDurationDefaults(metabolicDraft.blocks);
+    }
     data.programmingVersion=PROGRAMMING_VERSION;
   }
   data.saved.forEach(s=>{s.profile=Object.hasOwn(PROFILES,s.profile)?s.profile:'sin-definir';s.emphasis=Object.hasOwn(EMPHASES,s.emphasis)?s.emphasis:'equilibrado';s.filters.variation??='zone';if(s.profile==='principiante'){s.filters.beginner=true;s.filters.level=1;s.filters.noOverhead=true;s.filters.noTravel=true;}else if(s.filters.beginner)s.filters.beginner=false;});
