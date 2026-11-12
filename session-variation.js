@@ -48,7 +48,7 @@ function weeklyBlockOptions(block){
   return block.targetSeconds<min||block.targetSeconds>max?[...options,...fixed]:options;
 }
 
-function bestWeeklyPlan(blocks,choices,rng){
+function bestWeeklyPlan(blocks,choices){
   if(choices.some(options=>!options.length))return null;
   const remaining=[{min:0,max:0}];
   for(const options of [...choices].reverse()){
@@ -63,7 +63,7 @@ function bestWeeklyPlan(blocks,choices,rng){
       const changed=block.targetSeconds!==blocks[index].targetSeconds;
       const cycleReference=wiemsproProgram(block)||reference;
       const standardCycle=phase!=='recovery'&&timing.on===cycleReference.on&&timing.off===cycleReference.off;
-      const score=rng()*1.6+Number(standardCycle)*0.45-timing.buffer/30;
+      const score=Number(standardCycle)*0.45-timing.buffer/30;
       return {block,work:phase==='recovery'?0:timing.work,changed,score};
     });
     for(const plan of plans.values()){
@@ -91,9 +91,9 @@ function bestWeeklyPlan(blocks,choices,rng){
   return complete.sort((a,b)=>a.work-b.work||Number(b.changed)-Number(a.changed)||b.score-a.score)[0];
 }
 
-function varyWeeklyMetabolic(blocks,rng){
+function rebalanceLegacyMetabolicDurations(blocks){
   const choices=blocks.map(block=>weeklyBlockOptions(block));
-  const exact=bestWeeklyPlan(blocks,choices,rng);
+  const exact=bestWeeklyPlan(blocks,choices);
   if(exact)return exact.blocks;
   const total=blocks.reduce((seconds,block)=>seconds+block.targetSeconds,0);
   if(total===METABOLIC_SESSION_SECONDS&&blocks.every(block=>block.targetSeconds%60===0&&!solveTiming(block).error))return blocks;
@@ -111,7 +111,7 @@ export function updateMetabolicDurationDefaults(blocks){
   });
   const wasFullSession=blocks.reduce((seconds,block)=>seconds+block.targetSeconds,0)===METABOLIC_SESSION_SECONDS;
   if(wasFullSession&&updated.some((block,index)=>block!==blocks[index])){
-    return varyWeeklyMetabolic(updated,()=>0)??blocks;
+    return rebalanceLegacyMetabolicDurations(updated)??blocks;
   }
   return updated;
 }
@@ -158,13 +158,12 @@ function redistributeDuration(blocks,indices,options){
 }
 
 export function varySessionProgramming(blocks,{profile,hypertrophy=false,rng=Math.random}={}){
-  const weekly=!hypertrophy&&profile!=='principiante';
   const minutes=roundBlockDurations(blocks,{
-    skip:block=>block.timingLocked||(weekly&&canPlanWeeklyBlock(block)),
+    skip:block=>block.timingLocked,
     group:block=>hypertrophy&&isHypertrophyWork(block)
   });
-  if(weekly)return varyWeeklyMetabolic(minutes,rng);
   if(minutes.some(block=>block.targetSeconds%60!==0))return null;
+  if(!hypertrophy&&profile!=='principiante')return minutes;
   if(hypertrophy&&plannedEmsSeconds(minutes)>HYPERTROPHY_LIMIT)return null;
   const available=minutes.flatMap((block,index)=>
     block.timingLocked||block.timingPolicy==='pending'||solveTiming(block).error?[]:[index]

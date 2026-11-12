@@ -4,7 +4,7 @@ import {validateBackup,eligible,alternativeEligible} from './engine.js?v=program
 import {migrateProgramming,PHASE_ORDER_VERSION,PROGRAMMING_VERSION} from './metabolic.js?v=tiempos-bloques';
 import {upgradeNoviceBlocks} from './novice-presets.js';
 import {recommendedOrder} from './builder.js?v=tiempos-bloques';
-import {updateMetabolicDurationDefaults} from './session-variation.js?v=minutos-enteros';
+import {updateMetabolicDurationDefaults} from './session-variation.js?v=duraciones-fijas';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
 import {METABOLIC_CATALOG_VERSION} from './metabolic-catalog.js?v=banco-cardio';
 import {isHypertrophyBlock,isHypertrophyPlan,isHypertrophyWork} from './hypertrophy.js';
