@@ -1,7 +1,7 @@
 import {PATTERN_GROUP,exerciseInBankPhase} from './data.js?v=banco-cardio';
 import {METABOLIC_TIMINGS} from './metabolic.js?v=rutina-parametros';
 import {NOVICE_TIMINGS} from './novice-presets.js';
-import {validStimulation} from './stimulation.js?v=rutina-parametros';
+import {validStimulation} from './stimulation.js?v=metabolica-35';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
 import {HYPERTROPHY_LIMIT,isHypertrophyPlan,isHypertrophyBlock,isHypertrophyWork,solveHypertrophyTiming,validHypertrophyBlock,hypertrophyExerciseSuitable,plannedEmsSeconds} from './hypertrophy.js?v=rutina-parametros';
 export const VARIATION_MODES={zone:'Misma zona · más variedad',pattern:'Mismo patrón · más específico',block:'Todo el bloque · recomponer'};

@@ -1,6 +1,6 @@
-import {formatTime,solveTiming} from './engine.js?v=rutina-parametros';
+import {formatTime,solveTiming} from './engine.js?v=metabolica-35';
 import {CHANNELS,proposeChannels,sequenceGroups} from './metabolic.js?v=rutina-parametros';
-import {stimulationReference,formatRamp} from './stimulation.js?v=rutina-parametros';
+import {stimulationReference,formatRamp} from './stimulation.js?v=metabolica-35';
 import {EMPHASES,PROFILES} from './profiles.js';
 import {
   HYPERTROPHY_GROUPS,hypertrophyMuscleProposal,hypertrophyStimulation,
@@ -45,7 +45,7 @@ export function routineSheet(plan){
       const continuous=!voluntary&&block.phase==='recovery';
       const {hz,ems,rpe,rampUp,rampDown}=hypertrophy
         ? hypertrophyStimulation(block)
-        : stimulationReference(block.phase,profile,block.stimulation);
+        : stimulationReference(block.phase,profile,block.stimulation,timing);
       const intervals=voluntary?'Sin EMS':join([
         `${hz} Hz`,continuous?`Continuo · ${on} s por intervalo`:`ON ${on} s`,`OFF ${off} s`,
         hypertrophy?count(rounds,'serie','series'):count(rounds,'vuelta','vueltas'),
