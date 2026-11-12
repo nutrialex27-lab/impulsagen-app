@@ -36,6 +36,7 @@ export function routineSheet(plan){
   const activity=metabolicWorkSummary(blocks,timings);
   return {
     title:plan.title.trim()||'Rutina EMS',
+    profileNote:profile==='principiante'?'Iniciación tras familiarización':'',
     summary:join([
       hypertrophy?'Hipertrofia EMS':'EMS metabólico',
       profile!=='sin-definir'&&PROFILES[profile],
@@ -69,12 +70,15 @@ export function routineSheet(plan){
         : '';
       const maxRpe=block.phase==='metabolic'&&profile!=='principiante'?' máx.':'';
       const effort=join([!voluntary&&`Sensación EMS ${range(ems)}/10`,`RPE físico ${range(rpe)}/10${maxRpe}`]);
+      const pulse=program
+        ? join(['Pulso (µs)',...program.pulseWidths.map((width,index)=>`${CHANNELS[index]} ${width}`)])
+        : !hypertrophy&&!voluntary?'Comprobar ancho de pulso en Wiemspro':'';
       return {
         heading:`${String(index+1).padStart(2,'0')}   ${block.name}`,
         duration:formatTime(timing.total),
         intervals,effort,rest,order,
         program:program?`Wiemspro · ${program.name}`:'',
-        pulse:program?join(['Pulso (µs)',...program.pulseWidths.map((width,index)=>`${CHANNELS[index]} ${width}`)]):'',
+        pulse,
         exercises:block.slots.map(slot=>exercises.get(slot.exerciseId)),
         channels:channelTable(block,database,profile,emphasis,hypertrophy)
       };
@@ -146,9 +150,11 @@ export async function renderRoutinePdf(sheet){
     draw('IMPULSAFIT  /  FICHA WIEMSPRO',margin,y,{font:bold,size:9,color:accent});
     y-=17;
     textRows(sheet.title,{font:bold,size:18,x:margin,maxWidth:contentWidth}).forEach(paint);
-    draw(sheet.summary,margin,y,{size:10});
-    draw('Rampa y pulso · programa individual',margin,y-15,{size:9,color:muted});
-    y-=34;
+    textRows(sheet.summary,{x:margin,maxWidth:contentWidth}).forEach(paint);
+    draw(sheet.profileNote||'Rampa y pulso · programa individual',margin,y-1,{
+      font:sheet.profileNote?bold:regular,size:9,color:sheet.profileNote?accent:muted
+    });
+    y-=20;
   }
   function headingRow(block,continued=false){
     const heading=block.heading+(continued?' (cont.)':'');

@@ -9,7 +9,7 @@ import {PHASE_PATTERNS,createBlock,changePhase,moveItem,insertBlock,recommendedO
 import {stimulationForBlock,withStimulationProposals,formatRamp} from './stimulation.js?v=programas-ems';
 import {WIEMSPRO_DOSSIER,WIEMSPRO_PROGRAMS,wiemsproProgram} from './wiemspro.js?v=programas-ems';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
-import {routineSheet,renderRoutinePdf} from './routine-pdf.js?v=programas-ems';
+import {routineSheet,renderRoutinePdf} from './routine-pdf.js?v=ficha-pulso';
 import {
   METABOLIC_ON_REFERENCE,METABOLIC_SESSION_SECONDS,metabolicWorkSummary,varySessionProgramming
 } from './session-variation.js?v=tiempos-bloques';
