@@ -1,9 +1,10 @@
-import {PATTERN_GROUP,exerciseInBankPhase} from './data.js?v=banco-cardio';
+import {PATTERN_GROUP,exerciseInBankPhase} from './data.js?v=banco-variedad';
 import {METABOLIC_TIMINGS} from './metabolic.js?v=programas-ems';
 import {NOVICE_TIMINGS} from './novice-presets.js';
 import {validStimulation} from './stimulation.js?v=programas-ems';
 import {wiemsproProgram} from './wiemspro.js?v=programas-ems';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
+import {RECENT_EXERCISE_LIMIT,exerciseRecency,rememberExercise,rotationFamily} from './exercise-rotation.js';
 import {HYPERTROPHY_LIMIT,isHypertrophyPlan,isHypertrophyBlock,isHypertrophyWork,solveHypertrophyTiming,validHypertrophyBlock,hypertrophyExerciseSuitable,plannedEmsSeconds} from './hypertrophy.js?v=rutina-parametros';
 export const VARIATION_MODES={zone:'Misma zona · más variedad',pattern:'Mismo patrón · más específico',block:'Todo el bloque · recomponer'};
 export function formatTime(s) { return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; }
@@ -96,7 +97,7 @@ export function generate(blocks,database,filters,{blockId=null,blockIds=null,slo
   const required=new Set(explicitStrength?[]:blocks.filter(b=>['strength','main'].includes(b.phase)).flatMap(b=>b.slots.map(s=>s.pattern)).filter(p=>essentials.has(p)));
   const key=(b,group)=>`${b.id}:${group}`;
   const increment=(map,k,n)=>map.set(k,(map.get(k)||0)+n);
-  const track=(e,b,n)=>{increment(familyUsed,e.family,n);increment(groupUsed,key(b,PATTERN_GROUP[e.pattern]),n);if(['strength','main'].includes(b.phase))increment(essentialUsed,e.pattern,n);};
+  const track=(e,b,n)=>{increment(familyUsed,rotationFamily(e),n);increment(groupUsed,key(b,PATTERN_GROUP[e.pattern]),n);if(['strength','main'].includes(b.phase))increment(essentialUsed,e.pattern,n);};
   for(const b of result)for(const s of b.slots) {
     const e=records.get(s.exerciseId);
     const compatible=e&&eligible(e,b,s,filters);
@@ -107,8 +108,9 @@ export function generate(blocks,database,filters,{blockId=null,blockIds=null,slo
     // Within-zone strength changes keep a pushing/pulling slot specific, while
     // a lower-body slot can explore knee, hip and unilateral families.
     if(b.phase==='strength'&&mode==='zone'&&['empuje','tiron'].includes(s.pattern))mode='pattern';
-    if(mode==='block')increment(groupGoals,key(b,PATTERN_GROUP[s.pattern]),1);
-    if(target)tasks.push({b,s,mode,originalPattern:s.pattern});
+    const keepGroup=mode==='block'&&(!slotId||b.phase==='strength');
+    if(keepGroup)increment(groupGoals,key(b,PATTERN_GROUP[s.pattern]),1);
+    if(target)tasks.push({b,s,mode,keepGroup,originalPattern:s.pattern,previousId:s.exerciseId});
     else if(s.exerciseId) {
       if(inScope&&!compatible)errors.push('Un ejercicio conservado no cumple los filtros. Cámbialo desde su bloque, elige otra ficha o revisa los criterios.');
       if(occupied.has(s.exerciseId))errors.push('Hay ejercicios repetidos entre los que quieres conservar.');
@@ -118,16 +120,22 @@ export function generate(blocks,database,filters,{blockId=null,blockIds=null,slo
   }
   if(errors.length)return {error:errors[0]};
   if(!tasks.length)return {error:'No hay ejercicios desbloqueados para cambiar.'};
-  const oldIds=new Set(tasks.map(t=>t.s.exerciseId).filter(Boolean)),avoid=new Set(avoidIds);
-  const oldFamilies=new Set([...oldIds].map(id=>records.get(id)?.family).filter(Boolean));
+  const oldIds=new Set(tasks.map(t=>t.previousId).filter(Boolean)),avoid=new Set(avoidIds);
+  const oldFamilies=new Set([...oldIds].map(id=>records.get(id)).filter(Boolean).map(rotationFamily));
+  const recencyByBlock=new Map(result.map(block=>[block.id,exerciseRecency(block,records)]));
   for(const t of tasks) {
-    t.options=database.filter(e=>alternativeEligible(e,t.b,t.s,filters,t.mode)&&(t.b.phase!=='strength'||strengthBasic(e))&&!oldIds.has(e.id)&&!avoid.has(e.id)&&!occupied.has(e.id)).map(e=>({e,noise:rng()}));
+    const recent=recencyByBlock.get(t.b.id);
+    t.options=database.filter(e=>alternativeEligible(e,t.b,t.s,filters,t.mode)&&(t.b.phase!=='strength'||strengthBasic(e))&&!oldIds.has(e.id)&&!avoid.has(e.id)&&!occupied.has(e.id)).map(e=>{
+      const family=rotationFamily(e);
+      return {e,family,noise:rng(),recentExercise:recent.exercises.get(e.id),recentFamily:recent.families.get(family)};
+    });
     if(!t.options.length)return {error:`Sin alternativas para «${t.b.name} · ${t.s.pattern}». Añade ejercicios compatibles, amplía el material o revisa los filtros.`};
   }
   tasks.sort((a,b)=>a.options.length-b.options.length);
   let steps=0;
-  const canUse=(t,e)=>!occupied.has(e.id)&&(t.mode!=='block'||(groupUsed.get(key(t.b,PATTERN_GROUP[e.pattern]))||0)<(groupGoals.get(key(t.b,PATTERN_GROUP[e.pattern]))||0));
+  const canUse=(t,e)=>!occupied.has(e.id)&&(!t.keepGroup||(groupUsed.get(key(t.b,PATTERN_GROUP[e.pattern]))||0)<(groupGoals.get(key(t.b,PATTERN_GROUP[e.pattern]))||0));
   const missing=()=>[...required].filter(p=>!(essentialUsed.get(p)>0));
+  const recentWeight=index=>index===undefined?0:(RECENT_EXERCISE_LIMIT-index)/RECENT_EXERCISE_LIMIT;
   function search(index) {
     if(index===tasks.length)return !missing().length;
     if(++steps>100000)return false;
@@ -135,14 +143,21 @@ export function generate(blocks,database,filters,{blockId=null,blockIds=null,slo
     if(missing().some(p=>!tasks.slice(index).some(t=>['strength','main'].includes(t.b.phase)&&t.options.some(({e})=>e.pattern===p&&canUse(t,e)))))return false;
     const t=tasks[index];
     const supported=exercise=>exercise.position==='sentado'||/apoyo|pared|banco/.test(exercise.name.toLocaleLowerCase('es'));
-    const score=({e,noise})=>(familyUsed.get(e.family)||0)*5+(oldFamilies.has(e.family)?2:0)+noise-(filters.beginner&&supported(e)?1:0)-(required.has(e.pattern)&&!(essentialUsed.get(e.pattern)>0)&&['strength','main'].includes(t.b.phase)?10:0);
+    const score=({e,family,noise,recentExercise,recentFamily})=>{
+      const variety=(familyUsed.get(family)||0)*5+Number(oldFamilies.has(family))*4
+        +recentWeight(recentFamily)*5+recentWeight(recentExercise)*4;
+      const samePattern=t.mode!=='pattern'&&e.pattern===t.originalPattern;
+      const essential=required.has(e.pattern)&&!essentialUsed.get(e.pattern)&&['strength','main'].includes(t.b.phase);
+      return variety+Number(samePattern)+noise-Number(filters.beginner&&supported(e))-Number(essential)*10;
+    };
     const preferComplexity=t.b.phase==='metabolic';
     const preferSala=isHypertrophyBlock(t.b)&&filters.equipment.includes('sala');
     const isMachine=exercise=>exercise.equipment.some(key=>GYM_EQUIPMENT.includes(key));
     const options=t.options.filter(({e})=>canUse(t,e)).sort((a,b)=>{
       const levelOrder=preferComplexity?b.e.level-a.e.level:0;
       const salaOrder=preferSala?Number(isMachine(b.e))-Number(isMachine(a.e)):0;
-      return levelOrder||salaOrder||score(a)-score(b);
+      const repeatOrder=Number(a.recentExercise!==undefined)-Number(b.recentExercise!==undefined);
+      return salaOrder||repeatOrder||levelOrder||score(a)-score(b);
     });
     for(const {e} of options) {
       occupied.add(e.id);track(e,t.b,1);t.s.exerciseId=e.id;t.s.pattern=e.pattern;
@@ -152,6 +167,7 @@ export function generate(blocks,database,filters,{blockId=null,blockIds=null,slo
     return false;
   }
   if(!search(0))return {error:'No hay suficientes alternativas para conservar el reparto y los patrones básicos con estos filtros. Revisa el material o los criterios; tu sesión se conserva.'};
+  for(const {b,previousId} of tasks)rememberExercise(b,previousId);
   return {blocks:result};
 }
 export function validateSession(blocks,database,filters,{allowPendingTiming=false}={}) {
@@ -190,6 +206,7 @@ export function validateBackup(data,patterns,phases,equipment) {
       const channelsValid=b.channels===undefined||b.channels&&['torso','piernas','manual','pending','auto','beginner'].includes(b.channels.source)&&Array.isArray(b.channels.values)&&b.channels.values.length===10&&b.channels.values.every(v=>v===null||Number.isInteger(v)&&v>=0&&v<=100)&&b.channels.values[9]===0;
       if(b.emsProgram!==undefined&&!wiemsproProgram(b))return false;
       if(b.durationReference!==undefined&&(!Number.isInteger(b.durationReference)||b.durationReference<1||b.durationReference>7200))return false;
+      if(b.recentExerciseIds!==undefined&&(!Array.isArray(b.recentExerciseIds)||b.recentExerciseIds.length>RECENT_EXERCISE_LIMIT||!b.recentExerciseIds.every(id=>str(id,100))))return false;
       if(!str(b.id,100)||bid.has(b.id)||!str(b.name,140)||!b.name.trim()||!Object.hasOwn(phases,b.phase)||!Number.isInteger(b.targetSeconds)||b.targetSeconds<1||b.targetSeconds>7200||!onValid||!offValid||!channelsValid||!validStimulation(b.stimulation)||(b.timingPolicy!==undefined&&!['metabolic','custom','pending','beginner','hypertrophy','no-ems'].includes(b.timingPolicy))||(b.timingLocked!==undefined&&typeof b.timingLocked!=='boolean')||(b.sequence!==undefined&&!['circuit','pairs','exercise'].includes(b.sequence))||!['manual','auto'].includes(b.roundMode)||!Number.isInteger(b.rounds)||b.rounds<1||b.rounds>100||!str(b.notes)||!Array.isArray(b.slots)||!b.slots.length||b.slots.length>12||(b.variation!==undefined&&b.variation!=='inherit'&&!Object.hasOwn(VARIATION_MODES,b.variation)))return false;
       bid.add(b.id);for(const s of b.slots){if(!str(s.id,100)||sid.has(s.id)||!Object.hasOwn(patterns,s.pattern)||typeof s.locked!=='boolean'||(s.exerciseId!==null&&!str(s.exerciseId,100)))return false;sid.add(s.id);}
       if(isHypertrophyBlock(b)&&!validHypertrophyBlock(b))return false;

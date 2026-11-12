@@ -1,14 +1,13 @@
-import {SEED,PATTERNS,PHASES,EQUIPMENT,PATTERN_GROUP} from './data.js?v=tiempos-bloques';
+import {CATALOG_VERSION,SEED,PATTERNS,PHASES,EQUIPMENT,PATTERN_GROUP,FAMILY_LABELS} from './data.js?v=banco-variedad';
 import {PROFILES,EMPHASES} from './profiles.js';
-import {validateBackup,eligible,alternativeEligible} from './engine.js?v=programas-ems';
+import {validateBackup,eligible,alternativeEligible} from './engine.js?v=banco-variedad';
 import {migrateProgramming,PHASE_ORDER_VERSION,PROGRAMMING_VERSION} from './metabolic.js?v=tiempos-bloques';
 import {upgradeNoviceBlocks} from './novice-presets.js';
 import {recommendedOrder} from './builder.js?v=tiempos-bloques';
 import {updateMetabolicDurationDefaults} from './session-variation.js?v=duraciones-fijas';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
-import {METABOLIC_CATALOG_VERSION} from './metabolic-catalog.js?v=banco-cardio';
 import {isHypertrophyBlock,isHypertrophyPlan,isHypertrophyWork} from './hypertrophy.js';
-export const CATALOG_VERSION=METABOLIC_CATALOG_VERSION;
+export {CATALOG_VERSION};
 export function upgradeState(input){
   validateBackup(input,PATTERNS,PHASES,EQUIPMENT);
   const data=structuredClone(input),oldVersion=Number.isInteger(data.catalogVersion)?data.catalogVersion:1;
@@ -45,7 +44,7 @@ export function manualCandidates(blocks,database,filters,{blockId,slotId,pattern
   const q=query.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es').trim();
   const current=database.find(e=>e.id===slot.exerciseId),scope=pattern==='all'?'block':pattern==='zone'?'zone':'pattern';
   const criterion={...slot,pattern:isHypertrophyWork(block)||['all','zone'].includes(pattern)?slot.pattern:pattern};
-  return database.filter(e=>(!family||e.family===family)&&!occupied.has(e.id)&&(!avoid.has(e.id)||e.id===slot.exerciseId)&&alternativeEligible(e,block,criterion,filters,scope)&&(!q||`${e.name} ${PATTERNS[e.pattern]} ${e.family} ${e.cue} ${e.equipment.map(k=>EQUIPMENT[k]).join(' ')}`.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es').includes(q))).sort((a,b)=>{
+  return database.filter(e=>(!family||e.family===family)&&!occupied.has(e.id)&&(!avoid.has(e.id)||e.id===slot.exerciseId)&&alternativeEligible(e,block,criterion,filters,scope)&&(!q||`${e.name} ${PATTERNS[e.pattern]} ${e.family} ${FAMILY_LABELS[e.family]||''} ${e.cue} ${e.equipment.map(k=>EQUIPMENT[k]).join(' ')}`.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es').includes(q))).sort((a,b)=>{
     const levelOrder=block.phase==='metabolic'?b.level-a.level:0;
     const salaOrder=isHypertrophyBlock(block)?Number(b.equipment.some(key=>GYM_EQUIPMENT.includes(key)))-Number(a.equipment.some(key=>GYM_EQUIPMENT.includes(key))):0;
     const zoneOrder=Number(PATTERN_GROUP[b.pattern]===PATTERN_GROUP[slot.pattern])-Number(PATTERN_GROUP[a.pattern]===PATTERN_GROUP[slot.pattern]);

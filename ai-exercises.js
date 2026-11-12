@@ -1,4 +1,4 @@
-import {EQUIPMENT,FAMILY_LABELS,MOVEMENT_LEVELS,PATTERNS,PHASES,SEED,exerciseInBankPhase} from './data.js?v=banco-cardio';
+import {EQUIPMENT,FAMILY_LABELS,MOVEMENT_LEVELS,PATTERNS,PHASES,SEED,exerciseInBankPhase} from './data.js?v=banco-variedad';
 
 const ROOT='https://openrouter.ai';
 const CHAT='/api/v1/chat/completions';

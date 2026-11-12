@@ -2,8 +2,10 @@ import {EXTRA_ROWS} from './catalog.js';
 import {STRENGTH_RECORDS,FAMILY_LABELS as STRENGTH_FAMILY_LABELS} from './strength-catalog.js';
 import {METABOLIC_RECORDS,METABOLIC_FAMILY_LABELS,METABOLIC_CATALOG_VERSION} from './metabolic-catalog.js?v=banco-cardio';
 import {GYM_RECORDS} from './gym-catalog.js';
+import {VARIETY_CATALOG_VERSION,VARIETY_FAMILY_LABELS,VARIETY_ROWS} from './variety-catalog.js';
 import {METABOLIC_TIMINGS} from './metabolic-presets.js?v=tiempos-bloques';
-export const FAMILY_LABELS={...STRENGTH_FAMILY_LABELS,...METABOLIC_FAMILY_LABELS};
+export const CATALOG_VERSION=VARIETY_CATALOG_VERSION;
+export const FAMILY_LABELS={...STRENGTH_FAMILY_LABELS,...METABOLIC_FAMILY_LABELS,...VARIETY_FAMILY_LABELS};
 export const MOVEMENT_LEVELS={1:'Baja',2:'Media',3:'Alta'};
 export const PATTERNS = {
   rodilla: 'Dominante de rodilla', cadera: 'Dominante de cadera', empuje: 'Empuje',
@@ -97,10 +99,18 @@ const rows = [
   ['Respiración tumbado con pies apoyados','respiracion','respiracionsuelo','recovery',1,'colchoneta','suelo','','Descansar con pies apoyados y respiración tranquila.','Cambiar a posición sentada.'],
   ['Respiración con gemelos en banco','respiracion','respiracionsuelo','recovery',1,'banco,colchoneta','suelo','','Apoyar las piernas en el banco y mantener respiración cómoda.','Apoyar los pies en el suelo.']
 ];
-const toRecord=(r,id,catalogVersion)=>({id,name:r[0],pattern:r[1],family:r[2],phases:r[3].split(','),level:r[4],equipment:r[5]?r[5].split(','):[],position:r[6],flags:r[7]?r[7].split(','):[],cue:r[8],regression:r[9],enabled:true,catalogVersion});
+const toRecord=([name,pattern,family,phases,level,equipment,position,flags,cue,regression,components],id,catalogVersion)=>({
+  id,name,pattern,family,phases:phases.split(','),level,equipment:equipment?equipment.split(','):[],
+  position,flags:flags?flags.split(','):[],cue,regression,enabled:true,catalogVersion,
+  ...(components?{components:components.split(',')}:{})
+});
 const normalize=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
 const existingNames=new Set(rows.map(r=>normalize(r[0])));
-export const SEED = rows.map((r,i)=>toRecord(r,`base-${i+1}`,1)).concat(EXTRA_ROWS.map((r,i)=>toRecord(r,`catalog-${String(i+1).padStart(3,'0')}`,2)).concat(STRENGTH_RECORDS,METABOLIC_RECORDS,GYM_RECORDS).filter(e=>{const name=normalize(e.name);if(existingNames.has(name))return false;existingNames.add(name);return true;}));
+export const SEED = rows.map((r,i)=>toRecord(r,`base-${i+1}`,1)).concat([
+  ...EXTRA_ROWS.map((r,i)=>toRecord(r,`catalog-${String(i+1).padStart(3,'0')}`,2)),
+  ...STRENGTH_RECORDS,...METABOLIC_RECORDS,...GYM_RECORDS,
+  ...VARIETY_ROWS.map((row,index)=>toRecord(row,`variety-${index+1}`,VARIETY_CATALOG_VERSION))
+].filter(e=>{const name=normalize(e.name);if(existingNames.has(name))return false;existingNames.add(name);return true;}));
 const block=(phase,name,patterns,seconds=METABOLIC_TIMINGS[phase].seconds)=>{
   const {on,off}=METABOLIC_TIMINGS[phase];
   return {id:phase,name,phase,targetSeconds:seconds,preferredOn:phase==='recovery'?seconds:on,preferredOff:off,roundMode:'auto',rounds:1,timingPolicy:'metabolic',sequence:phase==='main'?'pairs':'circuit',notes:'',slots:patterns.map((pattern,i)=>({id:`${phase}-${i}`,pattern,exerciseId:null,locked:false}))};
