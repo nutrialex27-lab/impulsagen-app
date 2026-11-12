@@ -29,6 +29,18 @@
 
 .stimulation-panel{padding:13px 20px;border-bottom:1px solid var(--line);background:#fbfdfd}.stimulation-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.stimulation-grid>div{display:grid;gap:5px}.stimulation-grid span{font-size:10px;color:var(--muted);font-weight:600}.stimulation-grid b{font-size:19px;letter-spacing:-.4px;color:var(--ink)}.stimulation-grid small{font-size:11px;font-weight:500;color:var(--muted);letter-spacing:0}.stimulation-note{margin-top:9px;font-size:10px;line-height:1.5;color:var(--muted)}
 .stimulation-grid.with-ramps{grid-template-columns:repeat(5,minmax(0,1fr))}
+.stats.with-continuous{grid-template-columns:repeat(4,minmax(0,1fr))}
+.ems-program{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:8px 12px;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.ems-program label,.ems-pulse summary{font-size:12px;font-weight:600}
+.ems-program select{width:100%;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:white}
+.ems-pulse{grid-column:1/-1}
+.ems-pulse summary{cursor:pointer}
+.ems-pulse dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(74px,1fr));gap:8px 12px;margin:10px 0 0}
+.ems-pulse dt{font-size:10px;color:var(--muted)}
+.ems-pulse dd{margin:2px 0 0;font-size:12px;font-weight:600}
+@media(max-width:1100px){.stats.with-continuous{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.ems-program{grid-template-columns:1fr;gap:6px}}
+@media print{.ems-program{display:none}}
 @media(max-width:560px){.stimulation-panel{padding:12px 14px}.stimulation-grid{gap:8px}.stimulation-grid.with-ramps{grid-template-columns:repeat(3,minmax(0,1fr))}.stimulation-grid span{font-size:9px}.stimulation-grid b{font-size:18px}.stimulation-grid small{font-size:10px}}
 @media print{.stimulation-panel{display:block!important;padding:7px 10px;break-inside:avoid;border-top:1px solid #ddd}.stimulation-grid{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))}.stimulation-grid b{font-size:15px}.stimulation-note{font-size:8px;margin-top:5px}}
 

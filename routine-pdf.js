@@ -1,6 +1,7 @@
-import {formatTime,solveTiming} from './engine.js?v=metabolica-35';
-import {CHANNELS,proposeChannels,sequenceGroups} from './metabolic.js?v=rutina-parametros';
-import {stimulationReference,formatRamp} from './stimulation.js?v=metabolica-35';
+import {formatTime,solveTiming} from './engine.js?v=programas-ems';
+import {CHANNELS,proposeChannels,sequenceGroups} from './metabolic.js?v=programas-ems';
+import {stimulationForBlock,formatRamp} from './stimulation.js?v=programas-ems';
+import {metabolicWorkSummary} from './session-variation.js?v=programas-ems';
 import {EMPHASES,PROFILES} from './profiles.js';
 import {
   HYPERTROPHY_GROUPS,hypertrophyMuscleProposal,hypertrophyStimulation,
@@ -29,23 +30,28 @@ export function routineSheet(plan){
   const {blocks,database,profile='sin-definir',emphasis='equilibrado'}=plan;
   const hypertrophy=isHypertrophyPlan(plan);
   const exercises=new Map(database.map(exercise=>[exercise.id,exercise.name]));
+  const timings=blocks.map(solveTiming);
+  const invalid=timings.find(timing=>timing.error);
+  if(invalid)throw new Error(invalid.error);
+  const activity=metabolicWorkSummary(blocks,timings);
   return {
     title:plan.title.trim()||'Rutina EMS',
     summary:join([
       hypertrophy?'Hipertrofia EMS':'EMS metabólico',
       profile!=='sin-definir'&&PROFILES[profile],
       EMPHASES[emphasis],
-      `${formatTime(blocks.reduce((seconds,block)=>seconds+block.targetSeconds,0))} min`
+      `${formatTime(blocks.reduce((seconds,block)=>seconds+block.targetSeconds,0))} min`,
+      !hypertrophy&&`ON intermitente ${formatTime(activity.work)}`,
+      !hypertrophy&&activity.continuous>0&&`Calma continua ${formatTime(activity.continuous)}`
     ]),
     blocks:blocks.map((block,index)=>{
-      const timing=solveTiming(block);
-      if(timing.error)throw new Error(timing.error);
+      const timing=timings[index];
       const {on,off,rounds,cycles,buffer,extraRest}=timing;
       const voluntary=block.timingPolicy==='no-ems';
       const continuous=!voluntary&&block.phase==='recovery';
-      const {hz,ems,rpe,rampUp,rampDown}=hypertrophy
+      const {hz,ems,rpe,rampUp,rampDown,program}=hypertrophy
         ? hypertrophyStimulation(block)
-        : stimulationReference(block.phase,profile,block.stimulation,timing);
+        : stimulationForBlock(block,profile,timing);
       const intervals=voluntary?'Sin EMS':join([
         `${hz} Hz`,continuous?`Continuo · ${on} s por intervalo`:`ON ${on} s`,`OFF ${off} s`,
         hypertrophy?count(rounds,'serie','series'):count(rounds,'vuelta','vueltas'),
@@ -67,6 +73,8 @@ export function routineSheet(plan){
         heading:`${String(index+1).padStart(2,'0')}   ${block.name}`,
         duration:formatTime(timing.total),
         intervals,effort,rest,order,
+        program:program?`Wiemspro · ${program.name}`:'',
+        pulse:program?join(['Pulso (µs)',...program.pulseWidths.map((width,index)=>`${CHANNELS[index]} ${width}`)]):'',
         exercises:block.slots.map(slot=>exercises.get(slot.exerciseId)),
         channels:channelTable(block,database,profile,emphasis,hypertrophy)
       };
@@ -178,8 +186,9 @@ export async function renderRoutinePdf(sheet){
   for(const block of sheet.blocks){
     const heading=headingRow(block);
     const rows=[
+      ...textRows(block.program||'',{font:bold}),
       ...textRows(block.intervals,{font:bold}),
-      ...[block.effort,block.rest,block.order].flatMap(value=>textRows(value,{size:9,color:muted})),
+      ...[block.pulse||'',block.effort,block.rest,block.order].flatMap(value=>textRows(value,{size:9,color:muted})),
       ...block.exercises.flatMap((exercise,i)=>textRows(`${i+1}. ${exercise}`)),
       ...(block.channels?[tableRow(block.channels)]:[])
     ];

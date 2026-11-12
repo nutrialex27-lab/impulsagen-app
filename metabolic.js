@@ -2,6 +2,7 @@
 // lower-duty variants below are new programming options, not historical claims.
 import {NOVICE_TIMINGS,NOVICE_CHANNELS,NOVICE_LEVELS,noviceTiming} from './novice-presets.js';
 import {METABOLIC_TIMINGS} from './metabolic-presets.js';
+import {wiemsproProgram} from './wiemspro.js?v=programas-ems';
 export {METABOLIC_TIMINGS} from './metabolic-presets.js';
 export const PROGRAMMING_VERSION=4;
 export const CHANNELS=['PIERNAS','ISQUIO','GLÚTEOS','LUMBAR','DORSAL','TRAPECIO','ABDOM.','PECHO','BRAZO','EXTRA1'];
@@ -88,6 +89,7 @@ export function resetMetabolicTiming(block,{beginner=false,resetDuration=false}=
  const r=METABOLIC_TIMINGS[block.phase];
  const result={...structuredClone(block),targetSeconds:resetDuration?r.seconds:block.targetSeconds,preferredOn:r.on,preferredOff:r.off,roundMode:'auto',rounds:1,timingPolicy:'metabolic',timingLocked:false};
  if(resetDuration)delete result.durationReference;
+ delete result.emsProgram;
  return result;
 }
 export function sequenceGroups(block){
@@ -99,7 +101,7 @@ export function varyMetabolicTiming(before,after,{enabled=true,beginner=false,fo
  if(!enabled)return {blocks:result,changed,skipped};
  for(const b of result){
   const previous=before.find(x=>x.id===b.id),affected=forceBlock===b.id||previous&&(b.slots.length!==previous.slots.length||b.slots.some(s=>s.exerciseId!==previous.slots.find(p=>p.id===s.id)?.exerciseId));
-  if(!affected||b.phase==='recovery'||b.timingLocked||b.timingPolicy==='pending')continue;
+  if(!affected||b.phase==='recovery'||b.timingLocked||b.timingPolicy==='pending'||wiemsproProgram(b))continue;
   const rule=(beginner?NOVICE_TIMINGS:METABOLIC_TIMINGS)[b.phase],old=solve(b),options=rule.variants.map(([on,off])=>({...b,preferredOn:on,preferredOff:off,timingPolicy:beginner?'beginner':'metabolic'})).filter(candidate=>{const t=solve(candidate);return !t.error&&t.on>=rule.minOn&&t.on<=rule.on&&t.off>=rule.off&&(old.error||t.on!==old.on||t.off!==old.off);});
   if(!options.length){skipped++;continue;}
   Object.assign(b,options[Math.min(options.length-1,Math.floor(rng()*options.length))]);changed++;

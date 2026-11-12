@@ -1,3 +1,5 @@
+import {wiemsproProgram} from './wiemspro.js?v=programas-ems';
+
 // Frequency ranges and ramps from the ImpulsaFit metabolic sheets.
 const METABOLIC_STIMULATION={
  activation:{frequency:[18,22],ramp:1},
@@ -65,6 +67,13 @@ export function stimulationReference(phase,profile,previous,timing){
 }
 export function withStimulationProposals(blocks,profile,solve){
  return blocks.map(b=>({...b,stimulation:stimulationReference(b.phase,profile,b.stimulation,solve?.(b))}));
+}
+export function stimulationForBlock(block,profile,timing){
+ const reference=stimulationReference(block.phase,profile,block.stimulation,timing);
+ const program=wiemsproProgram(block);
+ if(!program||profile==='principiante')return reference;
+ const {hz,rampUp,rampDown,pulseWidths}=program;
+ return {...reference,hz,rampUp,rampDown,pulseWidths,program};
 }
 export const formatRamp=seconds=>String(seconds).replace('.',',')+' s';
 export function validStimulation(value){

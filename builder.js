@@ -17,6 +17,7 @@ export function createBlock(phase,id){
 export function changePhase(block,phase){
  if(!Object.hasOwn(PHASES,phase))throw Error('Tipo de bloque no válido.');
  const result=structuredClone(block),patterns=PHASE_PATTERNS[phase];
+ delete result.emsProgram;
  result.phase=phase;result.name=PHASES[phase];[result.preferredOn,result.preferredOff]=REFERENCES[phase];result.roundMode='auto';result.timingPolicy='metabolic';result.sequence=phase==='main'?'pairs':'circuit';delete result.channels;
  result.slots.forEach((s,i)=>{if(!s.locked){s.pattern=patterns[i%patterns.length];s.exerciseId=null;}});
  return result;

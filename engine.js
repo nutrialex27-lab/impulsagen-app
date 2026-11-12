@@ -1,7 +1,8 @@
 import {PATTERN_GROUP,exerciseInBankPhase} from './data.js?v=banco-cardio';
-import {METABOLIC_TIMINGS} from './metabolic.js?v=rutina-parametros';
+import {METABOLIC_TIMINGS} from './metabolic.js?v=programas-ems';
 import {NOVICE_TIMINGS} from './novice-presets.js';
-import {validStimulation} from './stimulation.js?v=metabolica-35';
+import {validStimulation} from './stimulation.js?v=programas-ems';
+import {wiemsproProgram} from './wiemspro.js?v=programas-ems';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
 import {HYPERTROPHY_LIMIT,isHypertrophyPlan,isHypertrophyBlock,isHypertrophyWork,solveHypertrophyTiming,validHypertrophyBlock,hypertrophyExerciseSuitable,plannedEmsSeconds} from './hypertrophy.js?v=rutina-parametros';
 export const VARIATION_MODES={zone:'Misma zona · más variedad',pattern:'Mismo patrón · más específico',block:'Todo el bloque · recomponer'};
@@ -16,6 +17,14 @@ export function solveTiming(block) {
   const n=block.slots.length,T=block.targetSeconds;
   if(!n||!Number.isInteger(T)||T<=0)return {error:'Añade ejercicios y una duración válida.'};
   if(isHypertrophyBlock(block))return solveHypertrophyTiming(block);
+  const program=wiemsproProgram(block);
+  if(program){
+    const {on,off}=program;
+    const rounds=block.roundMode==='manual'?block.rounds:Math.min(100,Math.floor(T/(n*(on+off))));
+    const cycles=n*rounds,used=cycles*(on+off);
+    if(!Number.isInteger(rounds)||rounds<1||used>T)return {error:'La duración es insuficiente para las vueltas con el programa Wiemspro. Ajusta la duración o el número de vueltas.'};
+    return {rounds,cycles,on,off,buffer:T-used,total:T,work:cycles*on,score:0};
+  }
   const continuous=block.phase==='recovery';
   if(!continuous&&(!Number.isFinite(block.preferredOn)||block.preferredOn<1||!Number.isFinite(block.preferredOff)||block.preferredOff<1))return {error:'Define el ON y el OFF de este bloque.'};
   const preferredOn=Math.max(1,Number(block.preferredOn)||1), preferredOff=continuous?0:Math.max(1,Number(block.preferredOff)||1);
@@ -160,6 +169,7 @@ export function validateBackup(data,patterns,phases,equipment) {
       const onValid=b.timingPolicy==='pending'&&b.preferredOn===null||Number.isFinite(b.preferredOn)&&b.preferredOn>=1&&b.preferredOn<=600;
       const offValid=b.timingPolicy==='pending'&&b.preferredOff===null||Number.isFinite(b.preferredOff)&&b.preferredOff>=0&&b.preferredOff<=600;
       const channelsValid=b.channels===undefined||b.channels&&['torso','piernas','manual','pending','auto','beginner'].includes(b.channels.source)&&Array.isArray(b.channels.values)&&b.channels.values.length===10&&b.channels.values.every(v=>v===null||Number.isInteger(v)&&v>=0&&v<=100)&&b.channels.values[9]===0;
+      if(b.emsProgram!==undefined&&!wiemsproProgram(b))return false;
       if(b.durationReference!==undefined&&(!Number.isInteger(b.durationReference)||b.durationReference<1||b.durationReference>7200))return false;
       if(!str(b.id,100)||bid.has(b.id)||!str(b.name,140)||!b.name.trim()||!Object.hasOwn(phases,b.phase)||!Number.isInteger(b.targetSeconds)||b.targetSeconds<1||b.targetSeconds>7200||!onValid||!offValid||!channelsValid||!validStimulation(b.stimulation)||(b.timingPolicy!==undefined&&!['metabolic','custom','pending','beginner','hypertrophy','no-ems'].includes(b.timingPolicy))||(b.timingLocked!==undefined&&typeof b.timingLocked!=='boolean')||(b.sequence!==undefined&&!['circuit','pairs','exercise'].includes(b.sequence))||!['manual','auto'].includes(b.roundMode)||!Number.isInteger(b.rounds)||b.rounds<1||b.rounds>100||!str(b.notes)||!Array.isArray(b.slots)||!b.slots.length||b.slots.length>12||(b.variation!==undefined&&b.variation!=='inherit'&&!Object.hasOwn(VARIATION_MODES,b.variation)))return false;
       bid.add(b.id);for(const s of b.slots){if(!str(s.id,100)||sid.has(s.id)||!Object.hasOwn(patterns,s.pattern)||typeof s.locked!=='boolean'||(s.exerciseId!==null&&!str(s.exerciseId,100)))return false;sid.add(s.id);}
@@ -169,8 +179,8 @@ export function validateBackup(data,patterns,phases,equipment) {
   };
   const validPlan=plan=>validBlocks(plan.blocks)&&(
     isHypertrophyPlan(plan)
-      ? plan.profile!=='principiante'&&plan.blocks.some(isHypertrophyWork)&&plan.blocks.every(isHypertrophyBlock)
-      : !plan.blocks.some(isHypertrophyBlock)
+      ? plan.profile!=='principiante'&&plan.blocks.some(isHypertrophyWork)&&plan.blocks.every(b=>isHypertrophyBlock(b)&&!b.emsProgram)
+      : !plan.blocks.some(isHypertrophyBlock)&&(plan.profile!=='principiante'||plan.blocks.every(b=>!b.emsProgram))
   );
   if(!validPlan(data))throw Error('La plantilla no es válida.');
   if(data.drafts!==undefined){

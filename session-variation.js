@@ -1,66 +1,106 @@
-import {solveTiming} from './engine.js?v=metabolica-35';
-import {METABOLIC_TIMINGS,varyMetabolicTiming} from './metabolic.js?v=rutina-parametros';
+import {solveTiming} from './engine.js?v=programas-ems';
+import {METABOLIC_TIMINGS,varyMetabolicTiming} from './metabolic.js?v=programas-ems';
 import {isHypertrophyBlock,isHypertrophyWork,varyHypertrophyTiming} from './hypertrophy.js?v=rutina-parametros';
+import {wiemsproProgram} from './wiemspro.js?v=programas-ems';
 
 export const METABOLIC_SESSION_SECONDS=35*60;
+// Intermittent ON in the base 35-minute ImpulsaFit session.
+export const METABOLIC_ON_REFERENCE=17*60+10;
 const WEEKLY_RANGES={
-  activation:[240,360],strength:[180,300],main:[480,900],
+  activation:[240,360],main:[480,900],
   core:[180,360],metabolic:[180,450],recovery:[180,300]
 };
-const TARGET_CHANGES=3;
+const WORK_PHASES=['main','core','metabolic'];
 
-const canPlanWeeklyBlock=block=>!block.timingLocked&&block.roundMode==='auto'
-  &&block.timingPolicy!=='custom'&&block.timingPolicy!=='pending';
+export function metabolicWorkSummary(blocks,timings=blocks.map(solveTiming)){
+  let work=0,continuous=0;
+  blocks.forEach((block,index)=>{
+    const on=timings[index].work||0;
+    if(block.phase==='recovery')continuous+=on;
+    else work+=on;
+  });
+  return {work,continuous};
+}
+
+const canPlanWeeklyBlock=block=>block.phase!=='strength'&&!block.timingLocked&&block.roundMode==='auto'
+  &&(block.timingPolicy!=='custom'||wiemsproProgram(block))&&block.timingPolicy!=='pending';
 
 function weeklyBlockOptions(block,{flexible=false}={}){
-  const current=()=>solveTiming(block).error?[]:[block];
-  if(!canPlanWeeklyBlock(block))return current();
+  const current=solveTiming(block);
+  const fixed=current.error?[]:[{block,timing:current}];
+  if(!canPlanWeeklyBlock(block))return fixed;
   const [min,max]=WEEKLY_RANGES[block.phase];
-  const {on,off}=METABOLIC_TIMINGS[block.phase];
+  const reference=METABOLIC_TIMINGS[block.phase];
+  const program=wiemsproProgram(block);
   const continuous=block.phase==='recovery';
-  const step=continuous||flexible?1:block.slots.length*(on+off);
+  const cycles=program?[[program.on,program.off]]
+    : WORK_PHASES.includes(block.phase)?reference.variants:[[reference.on,reference.off]];
   const options=[];
-  for(let seconds=Math.ceil(min/step)*step;seconds<=max;seconds+=step){
-    const candidate={
-      ...block,targetSeconds:seconds,preferredOn:continuous?seconds:on,preferredOff:off,
-      timingPolicy:'metabolic'
-    };
-    if(!solveTiming(candidate).error)options.push(candidate);
+  for(const [on,off] of cycles){
+    const step=continuous||flexible?1:block.slots.length*(on+off);
+    for(let seconds=Math.ceil(min/step)*step;seconds<=max;seconds+=step){
+      const candidate={...block,targetSeconds:seconds};
+      if(!program){
+        candidate.preferredOn=continuous?seconds:on;
+        candidate.preferredOff=off;
+        candidate.timingPolicy='metabolic';
+      }
+      const timing=solveTiming(candidate);
+      if(!timing.error)options.push({block:candidate,timing});
+    }
   }
-  return options.length?options:current();
+  return options.length?options:fixed;
 }
 
 function bestWeeklyPlan(blocks,choices,rng){
-  let plans=new Map([[0,{seconds:0,changes:0,score:0,blocks:[]}]]);
-  const key=(seconds,changes)=>seconds*(TARGET_CHANGES+1)+changes;
+  if(choices.some(options=>!options.length))return null;
+  const remaining=[{min:0,max:0}];
+  for(const options of [...choices].reverse()){
+    const seconds=options.map(({block})=>block.targetSeconds),tail=remaining[0];
+    remaining.unshift({min:Math.min(...seconds)+tail.min,max:Math.max(...seconds)+tail.max});
+  }
+  let plans=new Map([[0,{seconds:0,work:0,changed:false,score:0,blocks:[]}]]);
   for(const [index,options] of choices.entries()){
     const next=new Map();
-    const scored=options.map(block=>({
-      block,changed:Number(block.targetSeconds!==blocks[index].targetSeconds),score:rng()
-    }));
+    const phase=blocks[index].phase,reference=METABOLIC_TIMINGS[phase];
+    const scored=options.map(({block,timing})=>{
+      const changed=block.targetSeconds!==blocks[index].targetSeconds;
+      const cycleReference=wiemsproProgram(block)||reference;
+      const standardCycle=phase!=='recovery'&&timing.on===cycleReference.on&&timing.off===cycleReference.off;
+      const score=rng()*1.6+Number(standardCycle)*0.45
+        +(WORK_PHASES.includes(phase)&&changed?0.65:0)
+        +(phase==='activation'&&!changed?0.5:0)-timing.buffer/30;
+      return {block,work:phase==='recovery'?0:timing.work,changed,score};
+    });
     for(const plan of plans.values()){
-      for(const {block,changed,score} of scored){
+      for(const option of scored){
+        const {block}=option;
         const seconds=plan.seconds+block.targetSeconds;
-        const changes=Math.min(TARGET_CHANGES,plan.changes+changed);
-        const state=key(seconds,changes);
-        const weight=plan.score+score;
-        if(seconds>METABOLIC_SESSION_SECONDS||weight<=(next.get(state)?.score??-1))continue;
-        next.set(state,{seconds,changes,score:weight,blocks:[...plan.blocks,block]});
+        const left=METABOLIC_SESSION_SECONDS-seconds,tail=remaining[index+1];
+        if(left<tail.min||left>tail.max)continue;
+        const work=plan.work+option.work,changed=plan.changed||option.changed;
+        const state=(seconds*(METABOLIC_SESSION_SECONDS+1)+work)*2+Number(changed);
+        const score=plan.score+option.score;
+        if(score>(next.get(state)?.score??-Infinity))next.set(state,{seconds,work,changed,score,blocks:[...plan.blocks,block]});
       }
     }
     plans=next;
   }
-  for(let changes=TARGET_CHANGES;changes>=0;changes--){
-    const plan=plans.get(key(METABOLIC_SESSION_SECONDS,changes));
-    if(plan)return plan;
-  }
-  return null;
+  const complete=[...plans.values()];
+  const withinReference=complete.filter(plan=>plan.work<=METABOLIC_ON_REFERENCE);
+  const changed=withinReference.filter(plan=>plan.changed);
+  const options=changed.length?changed:withinReference;
+  const quality=plan=>plan.score-Math.abs(plan.work-METABOLIC_ON_REFERENCE)/50;
+  if(options.length)return options.reduce((best,plan)=>quality(plan)>quality(best)?plan:best);
+  // A manually chosen or locked combination may exceed the reference. Keep
+  // the 35-minute plan with the smallest feasible ON and show it in the summary.
+  return complete.sort((a,b)=>a.work-b.work||Number(b.changed)-Number(a.changed)||b.score-a.score)[0];
 }
 
 function varyWeeklyMetabolic(blocks,rng){
   const choices=blocks.map(block=>weeklyBlockOptions(block));
   const exact=bestWeeklyPlan(blocks,choices,rng);
-  if(exact?.changes>0)return exact.blocks;
+  if(exact?.changed&&exact.work<=METABOLIC_ON_REFERENCE)return exact.blocks;
 
   // A custom session with a fixed or missing recovery block can need an
   // adjusted cycle in one block to absorb seconds left by the other full rounds.
@@ -69,7 +109,7 @@ function varyWeeklyMetabolic(blocks,rng){
   if(flex){
     choices[blocks.indexOf(flex)]=weeklyBlockOptions(flex,{flexible:true});
     const adjusted=bestWeeklyPlan(blocks,choices,rng);
-    if(adjusted?.changes>0)return adjusted.blocks;
+    if(adjusted?.changed&&(!exact||adjusted.work<=Math.max(METABOLIC_ON_REFERENCE,exact.work)))return adjusted.blocks;
   }
   if(exact)return exact.blocks;
   const total=blocks.reduce((seconds,block)=>seconds+block.targetSeconds,0);
