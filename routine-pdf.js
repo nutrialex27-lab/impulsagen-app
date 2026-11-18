@@ -1,5 +1,5 @@
-import {formatTime,solveTiming} from './engine.js?v=programas-ems';
-import {CHANNELS,proposeChannels,sequenceGroups} from './metabolic.js?v=programas-ems';
+import {formatTime,solveTiming} from './engine.js?v=banco-variedad';
+import {CHANNELS,proposeChannels,sequenceGroups} from './metabolic.js?v=tiempos-bloques';
 import {stimulationForBlock,formatRamp} from './stimulation.js?v=programas-ems';
 import {metabolicWorkSummary} from './session-variation.js?v=duraciones-fijas';
 import {EMPHASES,PROFILES} from './profiles.js';

@@ -10,7 +10,7 @@ import {PHASE_PATTERNS,createBlock,changePhase,moveItem,insertBlock,recommendedO
 import {stimulationForBlock,withStimulationProposals,formatRamp} from './stimulation.js?v=programas-ems';
 import {WIEMSPRO_DOSSIER,WIEMSPRO_PROGRAMS,wiemsproProgram} from './wiemspro.js?v=programas-ems';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
-import {routineSheet,renderRoutinePdf} from './routine-pdf.js?v=duraciones-fijas';
+import {routineSheet,renderRoutinePdf} from './routine-pdf.js?v=ficha-actual';
 import {
   METABOLIC_ON_REFERENCE,metabolicWorkSummary,varySessionProgramming
 } from './session-variation.js?v=duraciones-fijas';
@@ -92,17 +92,31 @@ function downloadFile(blob,filename){
   link.remove();
   setTimeout(()=>URL.revokeObjectURL(url),30000);
 }
+const routineFields='input[data-change]:is([type="text"],[type="number"],:not([type])),textarea[data-change]';
+const routineFileDate=new Intl.DateTimeFormat('sv-SE',{
+  timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit',
+  hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3,hourCycle:'h23'
+});
+function hasPendingEdit(field){
+  return field?.matches(routineFields)&&field.value!==field.defaultValue;
+}
+function commitRoutineEdits(){
+  const pending=[...root.querySelectorAll(routineFields)].filter(hasPendingEdit);
+  return pending.every(field=>changeField(field)!==false);
+}
 let downloadingRoutine=false;
 async function downloadRoutine(){
   if(downloadingRoutine)return;
+  if(!commitRoutineEdits())return;
   const errors=validateSession(data.blocks,data.database,data.filters);
   if(errors.length)return toast(errors[0],true);
   downloadingRoutine=true;
   try{
     const sheet=routineSheet(data);
+    const timestamp=routineFileDate.format(new Date()).replace(' ','_').replace(/[:,]/g,'-');
+    const name=sheet.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'-').slice(0,100).trim();
     const bytes=await renderRoutinePdf(sheet);
-    const name=sheet.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'-').slice(0,110);
-    downloadFile(new Blob([bytes],{type:'application/pdf'}),`ImpulsaFit - ${name}.pdf`);
+    downloadFile(new Blob([bytes],{type:'application/pdf'}),`ImpulsaFit - ${name} - ${timestamp}.pdf`);
     toast('Ficha de la rutina descargada en PDF.');
   }catch{
     toast('No se ha podido descargar la ficha. Vuelve a pulsar «Descargar rutina PDF».',true);
@@ -248,8 +262,15 @@ document.addEventListener('input',event=>{
   if(event.target.id==='chooserSearch'&&ui.chooser){ui.chooser.query=event.target.value;refreshChooserRows();}
   if(event.target.id==='aiExerciseQuery'&&ui.ai&&!ui.ai.pending)updateAiQuery(event.target.value);
 });
-document.addEventListener('change',event=>{
-  const el=event.target,type=el.dataset.change;
+document.addEventListener('change',event=>changeField(event.target));
+root.addEventListener('pointerdown',event=>{
+  // A change on blur can re-render the button before its click arrives.
+  if(event.button===0&&event.target.closest('button[data-action="download-routine"]:enabled')&&hasPendingEdit(document.activeElement)){
+    event.preventDefault();
+  }
+});
+function changeField(el){
+  const type=el.dataset.change;
   if(['dbPattern','dbPhase','dbGroup','dbMaterial'].includes(el.id)){ui[{dbPattern:'pattern',dbPhase:'phase',dbGroup:'group',dbMaterial:'material'}[el.id]]=el.value;refreshBankRows();return;}
   if(el.id==='chooserFamily'&&ui.chooser){ui.chooser.family=el.value;refreshChooserRows();return;}
   if(el.id==='chooserPattern'&&ui.chooser){ui.chooser.pattern=el.value;ui.chooser.family='';refreshChooserRows();return;}
@@ -276,12 +297,20 @@ document.addEventListener('change',event=>{
   }
   if(type==='duration'){
     const seconds=parseTime(el.value,{wholeMinutes:true});
-    if(seconds===null){el.value=durationValue(b);return toast('Escribe minutos enteros entre 1 y 120, por ejemplo 5 o 6.',true);}
+    if(seconds===null){
+      el.value=durationValue(b);
+      toast('Escribe minutos enteros entre 1 y 120, por ejemplo 5 o 6.',true);
+      return false;
+    }
     checkpoint();b.targetSeconds=seconds;delete b.durationReference;commit(isHypertrophyBlock(b)?'Duración actualizada. Revisa las series y la pausa de cambio.':'Tiempos recalculados. Todos los ejercicios tienen las mismas vueltas.');return;
   }
   if(['preferredOn','preferredOff','rounds'].includes(type)){
     const value=Number(el.value),min=1,max=type==='rounds'?100:600;
-    if(!Number.isInteger(value)||value<min||value>max){el.value=b[type];return toast(`Usa un número entero entre ${min} y ${max}.`,true);}
+    if(!Number.isInteger(value)||value<min||value>max){
+      el.value=b[type];
+      toast(`Usa un número entero entre ${min} y ${max}.`,true);
+      return false;
+    }
     checkpoint();b[type]=value;if(type!=='rounds'){b.timingPolicy=b.preferredOn==null||b.preferredOff==null?'pending':'custom';b.timingLocked=true;}commit();return;
   }
   if(type==='manual-exercise'){
@@ -310,13 +339,21 @@ document.addEventListener('change',event=>{
     return;
   }
   if(type==='title'){data.title=el.value.trim()||(isHypertrophyPlan(data)?'Hipertrofia · Full body':'Metabólica · Sesión nueva');commit();return;}
-  if(type==='notes'){data.notes=el.value;persist();return;}
+  if(type==='notes'){
+    data.notes=el.value;
+    el.defaultValue=el.value;
+    persist();return;
+  }
   if(type==='block-name'){b.name=el.value.trim()||PHASES[b.phase];commit();return;}
-  if(type==='block-notes'){b.notes=el.value;persist();return;}
+  if(type==='block-notes'){
+    b.notes=el.value;
+    el.defaultValue=el.value;
+    persist();return;
+  }
   if(type==='round-mode'){b.roundMode=el.value;const t=solveTiming({...b,roundMode:'auto'});if(el.value==='manual'&&!t.error)b.rounds=t.rounds;commit();return;}
   if(type==='slot-pattern'){s.pattern=el.value;s.exerciseId=null;s.locked=false;commit('Criterio cambiado. Genera o elige un ejercicio compatible.');return;}
   if(type==='exercise-enabled'){const e=data.database.find(e=>e.id===el.dataset.id);e.enabled=el.checked;commit();return;}
-});
+}
 document.addEventListener('click',event=>{
   const el=event.target.closest('[data-action]');if(!el)return;
   const action=el.dataset.action,b=data.blocks.find(b=>b.id===el.dataset.block),s=b?.slots.find(s=>s.id===el.dataset.slot);
