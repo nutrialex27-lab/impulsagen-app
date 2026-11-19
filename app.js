@@ -11,6 +11,7 @@ import {stimulationForBlock,withStimulationProposals,formatRamp} from './stimula
 import {WIEMSPRO_DOSSIER,WIEMSPRO_PROGRAMS,wiemsproProgram} from './wiemspro.js?v=programas-ems';
 import {GYM_EQUIPMENT} from './gym-catalog.js';
 import {routineSheet,renderRoutinePdf} from './routine-pdf.js?v=ficha-actual';
+import {registroRoutine,REGISTRO_INBOX} from './registro-export.js?v=ciclos-1';
 import {
   METABOLIC_ON_REFERENCE,metabolicWorkSummary,varySessionProgramming
 } from './session-variation.js?v=duraciones-fijas';
@@ -103,6 +104,23 @@ function hasPendingEdit(field){
 function commitRoutineEdits(){
   const pending=[...root.querySelectorAll(routineFields)].filter(hasPendingEdit);
   return pending.every(field=>changeField(field)!==false);
+}
+function sendToRegistro(download=false){
+  if(!commitRoutineEdits())return;
+  const errors=validateSession(data.blocks,data.database,data.filters);
+  if(errors.length)return toast(errors[0],true);
+  try{
+    const packet=registroRoutine(data);
+    if(download){
+      downloadFile(new Blob([JSON.stringify(packet,null,2)],{type:'application/json'}),'ImpulsaFit_rutina_registro_'+new Date().toISOString().slice(0,10)+'.json');
+      toast('Archivo de rutina preparado para Registro EMS.');
+      return;
+    }
+    localStorage.setItem(REGISTRO_INBOX,JSON.stringify(packet));
+    const destination=new URL('../impulsafit-clientes-ems/',location.href);
+    destination.hash='rutina-recibida';
+    location.assign(destination.href);
+  }catch(error){toast(error.message||'No se pudo preparar la rutina para el registro.',true);}
 }
 let downloadingRoutine=false;
 async function downloadRoutine(){
@@ -235,7 +253,7 @@ function sessionActivityStats(hypertrophy,timings){
 function sessionPage(){
   const hypertrophy=isHypertrophyPlan(data);
   const errors=validateSession(data.blocks,data.database,data.filters),allTimings=data.blocks.map(solveTiming);
-  return `<main class="workspace">${programTabs()}<div class="page-heading"><div><div class="eyebrow muted" style="margin-bottom:10px">${hypertrophy?'MÉTODO ALEMÁN ADAPTADO':'GENERADOR METABÓLICO'}</div><h1>${hypertrophy?'Hipertrofia EMS':'Tu sesión. Tu criterio.'}</h1><p>${hypertrophy?'Full body por series para clientes adaptados.':'Cambia los ejercicios. Conserva la intención de cada bloque.'}</p></div><div class="page-actions">${button('undo','Deshacer','undo',{extra:ui.undo.length?'':'disabled',title:'Deshacer último cambio'})}${button('save','Guardar','save')}${button('download-routine','Descargar rutina PDF','download',{cls:'accent',extra:errors.length?'disabled':''})}${button('generate','Generar rutina','shuffle',{cls:'primary'})}${button('main','Renovar principal','shuffle',{extra:data.blocks.some(b=>hypertrophy?isHypertrophyWork(b):b.phase==='main')?'':'disabled'})}</div></div><div class="print-header"><div class="brand">Impulsa<span>Fit</span></div><h1>${esc(data.title)}</h1><p>${hypertrophy?'Hipertrofia EMS · Método alemán adaptado':'EMS metabólico'} · ${esc(PROFILES[data.profile])} · ${esc(EMPHASES[data.emphasis])} · ${formatTime(sum())} total · ${exercisesCount()} ejercicios · ${data.blocks.length} bloques · ${dateLabel(new Date().toISOString())}</p><p>Propuesta de ejercicios revisable por el entrenador. Parámetros del equipo definidos por el profesional.</p></div><div class="layout">${config()}<div class="content-column"><div class="stats${hypertrophy?'':' with-continuous'}"><div class="stat"><div class="label">Duración total</div><div class="value" id="totalDuration">${formatTime(sum())} <small>min</small></div><div class="sub">Incluye ON, OFF y ajustes finales</div></div><div class="stat"><div class="label">Estructura</div><div class="value">${data.blocks.length} <small>bloques</small></div><div class="sub">${exercisesCount()} ejercicios en total</div></div>${sessionActivityStats(hypertrophy,allTimings)}</div>${hypertrophy?hypertrophySummary():programmingSummary()+beginnerSummary()}<div class="session-title-row"><input class="session-title" aria-label="Nombre de la sesión" maxlength="140" data-change="title" value="${esc(data.title)}"><span class="autosaved">${storageError?'Exporta una copia':'Cambios guardados aquí'}</span></div>${errors.length?`<div class="validation ${data.blocks.some(b=>b.timingPolicy==='pending')?'pending-validation':''}" role="status"><b>${data.blocks.some(b=>b.timingPolicy==='pending')?'Completa los tiempos pendientes de configuración.':'Revisa la propuesta antes de guardar o descargar.'}</b><ul>${errors.slice(0,6).map(e=>`<li>${esc(e)}</li>`).join('')}</ul>${errors.length>6?`Y ${errors.length-6} incidencias más.`:''}</div>`:''}${hypertrophy?'':orderControl()}<div class="block-stack">${data.blocks.map((b,i)=>hypertrophy?hypertrophyBlockHTML(b,i):blockHTML(b,i)).join('')}</div>${hypertrophy?'':addBlockPanel()}<textarea class="session-notes" aria-label="Notas de la sesión" data-change="notes" maxlength="2000" placeholder="Notas de la sesión: cliente, cargas, observaciones…">${esc(data.notes)}</textarea><div class="print-notes print-final">${esc(data.notes)}</div><div class="session-footer"><div><b>Ficha para Wiemspro</b><br>Ejercicios y parámetros por bloque.</div>${button('download-routine','Descargar rutina PDF','download',{extra:errors.length?'disabled':''})}</div></div></div></main>`;
+  return `<main class="workspace">${programTabs()}<div class="page-heading"><div><div class="eyebrow muted" style="margin-bottom:10px">${hypertrophy?'MÉTODO ALEMÁN ADAPTADO':'GENERADOR METABÓLICO'}</div><h1>${hypertrophy?'Hipertrofia EMS':'Tu sesión. Tu criterio.'}</h1><p>${hypertrophy?'Full body por series para clientes adaptados.':'Cambia los ejercicios. Conserva la intención de cada bloque.'}</p></div><div class="page-actions">${button('undo','Deshacer','undo',{extra:ui.undo.length?'':'disabled',title:'Deshacer último cambio'})}${button('save','Guardar','save')}${button('registro','Usar en Registro EMS','save',{extra:errors.length?'disabled':''})}${button('registro-file','Archivo para Registro EMS','download',{extra:errors.length?'disabled':''})}${button('download-routine','Descargar rutina PDF','download',{cls:'accent',extra:errors.length?'disabled':''})}${button('generate','Generar rutina','shuffle',{cls:'primary'})}${button('main','Renovar principal','shuffle',{extra:data.blocks.some(b=>hypertrophy?isHypertrophyWork(b):b.phase==='main')?'':'disabled'})}</div></div><div class="print-header"><div class="brand">Impulsa<span>Fit</span></div><h1>${esc(data.title)}</h1><p>${hypertrophy?'Hipertrofia EMS · Método alemán adaptado':'EMS metabólico'} · ${esc(PROFILES[data.profile])} · ${esc(EMPHASES[data.emphasis])} · ${formatTime(sum())} total · ${exercisesCount()} ejercicios · ${data.blocks.length} bloques · ${dateLabel(new Date().toISOString())}</p><p>Propuesta de ejercicios revisable por el entrenador. Parámetros del equipo definidos por el profesional.</p></div><div class="layout">${config()}<div class="content-column"><div class="stats${hypertrophy?'':' with-continuous'}"><div class="stat"><div class="label">Duración total</div><div class="value" id="totalDuration">${formatTime(sum())} <small>min</small></div><div class="sub">Incluye ON, OFF y ajustes finales</div></div><div class="stat"><div class="label">Estructura</div><div class="value">${data.blocks.length} <small>bloques</small></div><div class="sub">${exercisesCount()} ejercicios en total</div></div>${sessionActivityStats(hypertrophy,allTimings)}</div>${hypertrophy?hypertrophySummary():programmingSummary()+beginnerSummary()}<div class="session-title-row"><input class="session-title" aria-label="Nombre de la sesión" maxlength="140" data-change="title" value="${esc(data.title)}"><span class="autosaved">${storageError?'Exporta una copia':'Cambios guardados aquí'}</span></div>${errors.length?`<div class="validation ${data.blocks.some(b=>b.timingPolicy==='pending')?'pending-validation':''}" role="status"><b>${data.blocks.some(b=>b.timingPolicy==='pending')?'Completa los tiempos pendientes de configuración.':'Revisa la propuesta antes de guardar o descargar.'}</b><ul>${errors.slice(0,6).map(e=>`<li>${esc(e)}</li>`).join('')}</ul>${errors.length>6?`Y ${errors.length-6} incidencias más.`:''}</div>`:''}${hypertrophy?'':orderControl()}<div class="block-stack">${data.blocks.map((b,i)=>hypertrophy?hypertrophyBlockHTML(b,i):blockHTML(b,i)).join('')}</div>${hypertrophy?'':addBlockPanel()}<textarea class="session-notes" aria-label="Notas de la sesión" data-change="notes" maxlength="2000" placeholder="Notas de la sesión: cliente, cargas, observaciones…">${esc(data.notes)}</textarea><div class="print-notes print-final">${esc(data.notes)}</div><div class="session-footer"><div><b>Ficha para Wiemspro</b><br>Ejercicios y parámetros por bloque.</div>${button('download-routine','Descargar rutina PDF','download',{extra:errors.length?'disabled':''})}</div></div></div></main>`;
 }
 const durationValue=block=>block.targetSeconds%60===0?block.targetSeconds/60:formatTime(block.targetSeconds);
 function durationField(block,attrs){
@@ -265,7 +283,7 @@ document.addEventListener('input',event=>{
 document.addEventListener('change',event=>changeField(event.target));
 root.addEventListener('pointerdown',event=>{
   // A change on blur can re-render the button before its click arrives.
-  if(event.button===0&&event.target.closest('button[data-action="download-routine"]:enabled')&&hasPendingEdit(document.activeElement)){
+  if(event.button===0&&event.target.closest('button[data-action="download-routine"]:enabled,button[data-action="registro"]:enabled,button[data-action="registro-file"]:enabled')&&hasPendingEdit(document.activeElement)){
     event.preventDefault();
   }
 });
@@ -431,6 +449,8 @@ document.addEventListener('click',event=>{
   }
   if(action==='delete-saved'){checkpoint();data.saved=data.saved.filter(s=>s.id!==el.dataset.id);commit('Sesión retirada del historial. Puedes deshacerlo.');return;}
   if(action==='download-routine')return downloadRoutine();
+  if(action==='registro')return sendToRegistro();
+  if(action==='registro-file')return sendToRegistro(true);
   if(action==='add-exercise'||action==='edit-exercise'){openExercise(action==='edit-exercise'?data.database.find(e=>e.id===el.dataset.id):null);return;}
   if(action==='close-dialog'){document.querySelector('#exerciseDialog').close();return;}
   if(action==='delete-exercise'){
